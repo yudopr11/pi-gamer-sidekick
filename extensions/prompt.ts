@@ -32,16 +32,16 @@ function buildGamingPrompt(state: SidekickState): string | null {
 		"",
 		`The player is playing **${identity.exe}**${binding.title ? ` (${binding.title})` : ""}. `,
 		"",
-		state.alwaysCapture
+		state.captureMode === "always"
 			? `Every message they send carries a \`[FRAME #NNN · ...]\` screenshot of the game's window, captured at the ` +
 					`instant they pressed Enter. You can pull a fresher one mid-answer with \`game_frame\`.`
 			: `No screenshot arrives with their messages. You have no view of the game until you call \`game_frame\`, ` +
-					`which takes one right now and returns it as an image. Call it whenever the answer depends on what is ` +
-					`on screen at this moment — what just happened, where they are, what a menu or status screen says, what ` +
-					`changed since the last frame. Answer without it — costing that turn nothing — when the question is ` +
-					`about lore, a build, an item recipe, a boss strategy or who a character is, or when an earlier frame in ` +
-					`the conversation already answers it. If a question needs a screen and you do not look, you will answer ` +
-					`from stale context and be confidently wrong, so when you are unsure whether the screen matters, look.`,
+						`which takes one right now and returns it as an image. Call it whenever the answer depends on what is ` +
+						`on screen at this moment — what just happened, where they are, what a menu or status screen says, what ` +
+						`changed since the last frame. Answer without it — costing that turn nothing — when the question is ` +
+						`about lore, a build, an item recipe, a boss strategy or who a character is, or when an earlier frame in ` +
+						`the conversation already answers it. If a question needs a screen and you do not look, you will answer ` +
+						`from stale context and be confidently wrong, so when you are unsure whether the screen matters, look.`,
 		"",
 		"- Describe only what is visibly in a frame you have actually taken. Never guess at off-screen content, and never invent items, stats, or dialogue you did not see.",
 		"- If a frame contradicts what the player says, trust the frame and say so plainly.",

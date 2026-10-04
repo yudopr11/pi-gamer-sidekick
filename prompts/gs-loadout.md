@@ -17,8 +17,7 @@ Not bound yet? Nothing else in this session captures anything.
 
 - `/gs frames` — list captured frames with their ids, size and token cost.
 - `/gs status` — what is bound, whether it is still alive, and the running frame counters.
-- `/gs auto on` — put a frame on every message instead, the older behaviour.
-- `/gs auto off` — go back to only capturing when it is needed.
+- `/gs auto off` — put a frame on every message instead, the older behaviour.
 
 Frames stay in the conversation once taken, so they survive a `/resume` and the
 companion can refer back to one by number later. A frame is ~150 KB of session

@@ -3,8 +3,8 @@
  *
  * A2 put the frame in the conversation unconditionally. A3 stops: by default the
  * model calls `game_frame` when a question depends on the screen, and the hook
- * captures only when `/gs auto` has put it back on always-on. So the tests split
- * by mode — the `alwaysCapture` suite is the old behaviour kept alive as a
+ * captures only under `/gs auto off`. So the tests split
+ * by mode — the `always` suite is the old behaviour kept alive as a
  * fallback, and the on-demand suite is the default.
  *
  * The capture step is injected so these tests need neither Windows nor a game.
@@ -15,7 +15,7 @@ import { describe, it } from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 import { buildFrameMessage, registerAttachment } from "../extensions/attach.ts";
-import { createState, type Frame, type SidekickState } from "../extensions/state.ts";
+import { createState, type CaptureMode, type Frame, type SidekickState } from "../extensions/state.ts";
 import type { CaptureOutcome } from "../extensions/capture.ts";
 
 const JPEG_B64 = Buffer.from("not-really-a-jpeg").toString("base64");
@@ -70,11 +70,11 @@ function fakePi() {
 	return { pi, fire, appended, notified };
 }
 
-function boundState(options: { alwaysCapture?: boolean } = {}): SidekickState {
+function boundState(options: { captureMode?: CaptureMode } = {}): SidekickState {
 	const s = createState();
 	s.available = true;
 	s.ready = Promise.resolve();
-	s.alwaysCapture = options.alwaysCapture ?? false;
+	s.captureMode = options.captureMode ?? "auto";
 	s.binding = {
 		hwnd: 1,
 		identity: { exe: "sora_2nd.exe", slug: "sora-1", ownerPath: "C:/sora_2nd.exe" },
@@ -180,7 +180,7 @@ describe("on-demand capture — the default", () => {
 
 describe("always-on capture — the /gs auto fallback", () => {
 	it("captures on submit and appends metadata only", async () => {
-		const state = boundState({ alwaysCapture: true });
+		const state = boundState({ captureMode: "always" });
 		const { pi, fire, appended } = fakePi();
 		registerAttachment(pi, state, async () => okCapture(makeFrame(1)));
 
@@ -197,7 +197,7 @@ describe("always-on capture — the /gs auto fallback", () => {
 	});
 
 	it("returns the frame as a conversation message", async () => {
-		const state = boundState({ alwaysCapture: true });
+		const state = boundState({ captureMode: "always" });
 		const { pi, fire } = fakePi();
 		registerAttachment(pi, state, async () => okCapture(makeFrame(1)));
 
@@ -233,13 +233,13 @@ describe("always-on capture — the /gs auto fallback", () => {
 		// after launch used to see available:false / reason:null and report the
 		// package as switched off when it was only still starting up.
 		const state = createState();
-		state.alwaysCapture = true;
+		state.captureMode = "always";
 		const { pi, fire, appended } = fakePi();
 		registerAttachment(pi, state, async () => okCapture(makeFrame(1)));
 
 		let release!: () => void;
 		state.ready = new Promise<void>((r) => (release = r));
-		state.binding = boundState({ alwaysCapture: true }).binding;
+		state.binding = boundState({ captureMode: "always" }).binding;
 
 		const pending = fire("before_agent_start", { type: "before_agent_start", prompt: "q" });
 		assert.equal(appended.length, 0, "must not capture while the probe is still running");
@@ -252,7 +252,7 @@ describe("always-on capture — the /gs auto fallback", () => {
 	});
 
 	it("never blocks the turn when capture fails", async () => {
-		const state = boundState({ alwaysCapture: true });
+		const state = boundState({ captureMode: "always" });
 		const { pi, fire, appended } = fakePi();
 		registerAttachment(pi, state, async () => failCapture("black-frame"));
 
@@ -266,7 +266,7 @@ describe("always-on capture — the /gs auto fallback", () => {
 	});
 
 	it("keeps capturing once a window is bound", async () => {
-		const state = boundState({ alwaysCapture: true });
+		const state = boundState({ captureMode: "always" });
 		const { pi, fire } = fakePi();
 		registerAttachment(pi, state, async () => okCapture(makeFrame(2)));
 

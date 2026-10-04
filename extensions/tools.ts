@@ -39,6 +39,14 @@ interface GameFrameDetails {
 	reason?: string;
 }
 
+/** What the model is told about when it can see the game. One sentence, two modes. */
+export function describeMode(state: SidekickState): string {
+	if (state.captureMode === "always") {
+		return "Every message is being captured automatically, because the player asked for that. A frame arrives with each one; do not call game_frame.";
+	}
+	return "No frame arrives with a message. You have no view of the game until you call game_frame.";
+}
+
 /** Is this tool worth exposing right now? */
 async function activeTool(state: SidekickState): Promise<{ active: boolean; reason: string }> {
 	await state.ready;
@@ -48,6 +56,8 @@ async function activeTool(state: SidekickState): Promise<{ active: boolean; reas
 		const why = state.disabledReason ?? "still starting up";
 		return { active: false, reason: `screen capture is unavailable on this machine (${why})` };
 	}
+	// `/gs auto off` puts a frame on every message, so the tool has nothing
+	// left to add and is pure cost.
 	if (!state.binding) return { active: false, reason: "no game window is bound — run /gs play" };
 	return { active: true, reason: "" };
 }
@@ -69,7 +79,8 @@ export function registerTools(
 			"where the player is, what a menu or status screen says, or what changed since the last frame. " +
 			"Answer without calling it when the question is about lore, a build, an item recipe, a boss strategy " +
 			"or who a character is, or when an earlier frame already answers it. Only works while a game window " +
-			"is bound; if it fails, say so and answer from what the player told you.",
+			"is bound; if it fails, say so and answer from what the player told you. " +
+			"Under `/gs auto off` a frame already arrives with every message, so do not call this.",
 		promptSnippet: "game_frame: screenshot the player's game window, on demand",
 		promptGuidelines: [
 			"Call game_frame when your answer depends on what is on screen at this moment — the scene just described, a location, a menu, a status screen, a change since the last frame.",
@@ -160,7 +171,7 @@ export function registerTools(
 						text:
 							`Bound window: ${b.identity.exe} "${b.title}" ${formatSize(b.bounds)} on display ${details.displayIndex}. ` +
 							`${state.framesCaptured} frame(s) captured in this conversation. ` +
-							`${state.alwaysCapture ? "Every message is being captured automatically." : "Frames are captured only when you call game_frame."}`,
+							`${describeMode(state)}`,
 					},
 				],
 				details,

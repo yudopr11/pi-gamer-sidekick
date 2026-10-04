@@ -196,6 +196,22 @@ describe("game_frame", () => {
 		assert.ok(!activeTools().includes("game_frame"));
 		assert.ok(!activeTools().includes("game_window"));
 	});
+
+	it("explains the mode it is actually in, so the model knows what it can see", async () => {
+		const { pi, tools } = fakePi();
+		registerTools(pi, boundState(), capturesFrame(1));
+
+		const onDemand = await tools.get("game_window")?.execute("a", {});
+		assert.match(onDemand?.content[0]?.text ?? "", /until you call game_frame/i);
+
+		const always = boundState();
+		always.captureMode = "always";
+		const { pi: pi2, tools: tools2 } = fakePi();
+		registerTools(pi2, always, capturesFrame(1));
+
+		const full = await tools2.get("game_window")?.execute("b", {});
+		assert.match(full?.content[0]?.text ?? "", /captured automatically/i);
+	});
 });
 
 describe("game_window", () => {

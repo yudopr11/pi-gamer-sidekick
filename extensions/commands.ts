@@ -12,7 +12,7 @@ import { appendBinding } from "./binding.ts";
 import { describeFailure, statusText } from "./attach.ts";
 import { gameIdentity } from "./identity.ts";
 import { rehydrateLedger } from "./ledger.ts";
-import { formatSize, type Binding, type SidekickState } from "./state.ts";
+import { formatSize, type Binding, type CaptureMode, type SidekickState } from "./state.ts";
 import {
 	displayFor,
 	filterWindows,
@@ -28,19 +28,26 @@ import {
 const HELP = [
 	"Gamer Sidekick — brings the game you are playing into your conversation.",
 	"",
-	"  /gs play [exe]    bind a window to capture",
-	"  /gs status        what is bound, and what has been captured",
-	"  /gs frames        frames captured in this conversation",
-	"  /gs auto <on|off> capture every message, or only when it is asked for",
-	"  /gs display <n>   look for the window on display <n>",
-	"  /gs setup         check that window capture works on this machine",
-	"  /gs unbind        stop capturing",
-	"  /gs help          this list",
+	"  /gs play [exe]      bind a window to capture",
+	"  /gs status          what is bound, and what has been captured",
+	"  /gs frames          frames captured in this conversation",
+	"  /gs auto [on|off]   on: it looks when the answer needs the screen (default)",
+	"                       off: every message carries a frame",
+	"  /gs display <n>     look for the window on display <n>",
+	"  /gs setup           check that window capture works on this machine",
+	"  /gs unbind          stop capturing",
+	"  /gs help            this list",
 	"",
 	"A binding lives in one conversation, so a new one needs its own /gs play.",
 	"By default nothing is photographed until the answer needs the screen.",
 	"Each frame costs about 150 KB of session file and ~600 image tokens.",
 ].join("\n");
+
+/** How the two modes read on a status line and in a notification. */
+const MODE_LABEL: Record<CaptureMode, string> = {
+	auto: "on request only",
+	always: "every message",
+};
 
 export function registerCommands(pi: ExtensionAPI, state: SidekickState): void {
 	pi.registerCommand("gs", {
@@ -106,7 +113,7 @@ async function runSubcommand(
 		case "frames":
 			return cmdFrames(state, ctx);
 		case "auto":
-			return cmdAuto(state, arg, ctx);
+			return cmdMode(state, arg, ctx);
 		case "display":
 			return cmdDisplay(state, arg, ctx);
 		default:
@@ -136,35 +143,39 @@ function cmdStatus(state: SidekickState, ctx: ExtensionCommandContext): void {
 		`display   ${b.displayOverride ?? b.display?.index ?? "?"}${b.display ? `  ${b.display.width}x${b.display.height} at (${b.display.x},${b.display.y})` : ""}`,
 		`bound     ${new Date(b.boundAt).toLocaleString()}`,
 		`frames    ${state.framesCaptured} in this conversation · ${state.framesAttached} attached this run · ${state.framesDropped} dropped this run`,
-		`capture   ${state.alwaysCapture ? "every message" : "on request only"}`,
+		`capture   ${MODE_LABEL[state.captureMode]}`,
 	];
 	if (state.lastError) lines.push(`last err  ${state.lastError}`);
 	ctx.ui.notify(lines.join("\n"), state.bindingStale ? "warning" : "info");
 }
 
 /**
- * `/gs auto on|off` — the escape hatch for A3.
+ * `/gs auto [on|off]` — who decides when a frame is taken.
  *
- * On-demand capture asks the model to reach for a tool, which is the right
- * default but not one every player wants to depend on. Turning it on restores
- * the A2 behaviour exactly: a frame with every message, whether or not it is
- * needed.
+ * The toggle is about the decision, not about capture. `on` is the default and
+ * hands the decision to the model: it calls `game_frame` when the answer
+ * depends on the screen, and turns that do not cost nothing. `off` removes the
+ * decision and sends a frame with every message, needed or not — the A2
+ * behaviour, kept for anyone who would rather not depend on the model reaching
+ * for the tool.
+ *
+ * This started as a boolean behind a single `/gs auto on|off` with the two
+ * meanings swapped, which is the kind of thing that sounds fine until you try
+ * to explain it to somebody: `auto on` promising an automatic decision while
+ * in fact forcing a frame onto every message.
  */
-function cmdAuto(state: SidekickState, arg: string, ctx: ExtensionCommandContext): void {
+function cmdMode(state: SidekickState, arg: string, ctx: ExtensionCommandContext): void {
 	const want = arg.trim().toLowerCase();
 	if (want !== "on" && want !== "off") {
-		ctx.ui.notify(
-			`Capturing ${state.alwaysCapture ? "every message" : "only when the answer needs the screen"}. Usage: /gs auto on|off`,
-			"info",
-		);
+		ctx.ui.notify(`Capturing ${MODE_LABEL[state.captureMode]}. Usage: /gs auto on|off`, "info");
 		return;
 	}
 
-	state.alwaysCapture = want === "on";
+	state.captureMode = want === "on" ? "auto" : "always";
 	ctx.ui.notify(
-		state.alwaysCapture
-			? "Every message will carry a frame of the game window. That is ~150 KB of session file and ~600 image tokens per message."
-			: "Frames will be taken only when the answer needs the screen. Messages that do not will cost nothing.",
+		want === "on"
+			? "It will look when the answer needs the screen. Messages that do not will cost nothing."
+			: "Every message will carry a frame of the game window. That is ~150 KB of session file and ~600 image tokens per message.",
 		"info",
 	);
 }

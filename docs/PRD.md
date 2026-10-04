@@ -112,7 +112,7 @@ conversation · 0 attached this run" is unambiguous.
 
 **Withdrawn:** the per-message automatic capture. `before_agent_start` no longer
 captures and no longer returns a frame message. With one exception — `/gs auto
-on`, which restores A2 exactly — `game_frame` is the only path to a frame.
+off`, which restores A2 exactly — `game_frame` is the only path to a frame.
 
 **Why.** Three consecutive messages in one sitting produced three frames of the
 same room with only the tips box changed: ~595 image tokens and ~150 KB of
@@ -138,9 +138,20 @@ what the call is.
   with `reason: "tool"`. A tool result is not a conversation message, so nothing
   else in the transcript describes it — without the entry the ledger would
   rebuild from zero in the next process and `/gs frames` would forget it.
-- `/gs auto on|off` is the escape hatch. Default `off`. `/gs status` reports the
-  mode; the status line appends `· every message` when it is on.
-- `alwaysCapture: boolean` on `SidekickState`, default `false`.
+- Two states, one command, one field — `captureMode: "auto" | "always"` on `SidekickState`.
+  `/gs auto on` is the default and means *the model decides*: it calls `game_frame` when the
+  answer depends on the screen, and turns that do not cost nothing. `/gs auto off` removes the
+  decision and sends a frame with every message, needed or not. `/gs status` reports the mode
+  as `capture on request only` or `capture every message`; the status line appends
+  `· every message` in `always`.
+- **Naming correction, same day.** This shipped first as a boolean (`alwaysCapture`) behind a
+  single `/gs auto on|off` with the two meanings swapped: `auto on` promised that the package
+  would work out whether a frame was needed while in fact forcing one onto every message. The
+  owner caught it — *"`auto` should mean auto detect which model need call frame tool or not.
+  it confuse if auto on but always send frame"*, and then pinned the intended reading down
+  exactly: *"`auto on` then ai decide call tool frame or not; `auto off` then always call tool
+  frame"*. The flag is about **who decides**, not about whether capture happens — which is why
+  `off` still captures.
 
 **The bonus.** A2's correction — that pi renders only the *text* blocks of a
 custom message — made a picture on screen impossible from the automatic path.
@@ -149,7 +160,7 @@ mechanism in this package where the player actually sees the game.
 
 **The cost, stated plainly.** A turn that needs a frame costs an extra round
 trip. And the whole thing depends on the model reaching for the tool; with a
-small free model, compliance is the weak point. `/gs auto on` is the fallback
+small free model, compliance is the weak point. `/gs auto off` is the fallback
 for anyone who will not accept that dependency.
 
 **Measured** (live, `scratch/probe-ondemand.ts`, three questions — two about the
@@ -159,7 +170,7 @@ game, one about the screen — against Trails in the Sky 2nd Chapter):
 tool results        : 3          (1 game_window, 2 game_frame)
 frames via the tool : 2          (reason: "tool")
 frames automatically: 0          (reason: "prompt")
-auto frame messages : 0          (the /gs auto on path — must be 0)
+auto frame messages : 0          (the /gs auto off path — must be 0)
 status              : ● Sidekick sora_2nd.exe · 2560×1440 · 2 frames
 ```
 
@@ -439,7 +450,7 @@ nothing to be ambiguous about. Resolution:
 
 **What ships:** the model calls `game_frame`. Nothing is captured on submit. The
 `before_agent_start` hook still exists, but only to re-read the binding and the
-ledger, and — when the player has run `/gs auto on` — to capture the A2 way.
+ledger, and — when the player has run `/gs auto off` — to capture the A2 way.
 
 §6.3.1 and §6.3.2 below describe the design as it was. They are kept because the
 reasoning — and the two costs it accepted — are the record of two decisions that
@@ -487,7 +498,7 @@ A vision model will happily accept fifty 1280px screenshots. The user cannot aff
 | Rule | Value | Rationale |
 | --- | --- | --- |
 | Frames per turn | **0** on the default path | The model asks when the answer needs one |
-| Frames per turn, `/gs auto on` | 1 | One frame is what the question is about |
+| Frames per turn, `/gs auto off` | 1 | One frame is what the question is about |
 | Frames held in memory for the ledger | 50 rows, metadata only | `/gs frames` only ever needs the recent tail |
 | Frames in the transcript | every frame ever taken, on demand | They stay in the conversation so `/resume` keeps them; `/compact` is the release valve |
 
@@ -552,7 +563,7 @@ All of this is pi functionality; Gamer Sidekick only calls it.
 | --- | --- |
 | `/gs play [exe\|n]` | Bind a game window (§6.1.2) |
 | `/gs unbind` | Stop capturing; session becomes text-only |
-| `/gs auto <on\|off>` | Capture every message, or only when the model asks (§0 A3). Default `off` |
+| `/gs auto [on\|off]` | `on`: it looks when the answer needs the screen (§0 A3, default). `off`: every message carries a frame |
 | `/gs display <n>` | Override the display used for capture (§6.2.3) |
 | `/gs frames` | Table of frames captured in this conversation: id, exe, size, bytes, timestamp |
 | *(none)* | Session management is the player's, via pi's own `/resume` (§0 A1) |
@@ -605,7 +616,7 @@ that is not true**, so there is no frame counter until there is a frame to count
 ● Sidekick eldenring.exe · 1920×1440 · 14 frames · stale
 ```
 
-The `· every message` marker appears only when `/gs auto on` has put capture
+The `· every message` marker appears only when `/gs auto off` has put capture
 back on every message (§0 A3) — a mode the player set deliberately and will
 notice its absence when it stops being what they want.
 
@@ -932,7 +943,7 @@ M2 is the milestone that matters. **If frames cannot be attached without hitting
 | **G-D2** | **No overlay window in v0.1.0** | Unreachable from inside a pi package: `registerShortcut` needs pi's terminal focused, and RPC mode makes `onTerminalInput()` a no-op. The window is possible only from an external host (§11.1) |
 | **G-D3** | Capture target is a **bound window**, not the foreground window | The foreground window at capture time is the terminal the user is typing in. Foreground capture is structurally wrong for this product |
 | ~~**G-D4**~~ **SUPERSEDED by A2** | Inject frames at the **`context`** event, not by rewriting the user message | `before_agent_start`'s message result is persisted to the session file; that would write ~330 KB of base64 per turn. The player wants the frame *in* the conversation, so the old rationale no longer applies. Frames are now returned as a custom message from `before_agent_start`, which costs disk and buys scrollback, `/resume` and persistence for free |
-| ~~**G-D5**~~ **SUPERSEDED by A3** | ~~Frame budget: 1 live + 3 pinned~~ | A budget only made sense when capture was unconditional. On demand the model is already the budget, and `/gs auto on` is the escape hatch |
+| ~~**G-D5**~~ **SUPERSEDED by A3** | ~~Frame budget: 1 live + 3 pinned~~ | A budget only made sense when capture was unconditional. On demand the model is already the budget, and `/gs auto off` is the escape hatch |
 | **G-D6** | No model list, pricing table, or API-key handling | pi owns all three. Duplicating them guarantees drift |
 | **G-D7** | Non-competitive games only; advisory list, `warn` by default | Carried forward from the deprecated PRD; product policy, not architecture |
 | **G-D8** | Capture failure never fails the question | A gaming companion that silently drops your question is worse than one that answers without a frame |
@@ -962,7 +973,7 @@ Before development starts, confirm:
 - [ ] **G-D2 accepted:** no overlay in v0.1.0. The user alt-tabs to a terminal. (§4.2, §11 R-1)
 - [x] ~~**G-D4 accepted: frames are injected at the `context` event so image bytes never reach disk. Enforced by AC-GS-09.~~ **SUPERSEDED by A2** — the player traded the disk guarantee for frames in the conversation.
 - [ ] ~~§6.3.2's `context`-injection mechanism is understood to be load-bearing. If it does not work, M2 stops and the package is re-scoped.~~ **WITHDRAWN (A2/A3)** — replaced by the ledger (§ `extensions/ledger.ts`) and by `game_frame`.
-- [ ] **A3 accepted:** capture is on demand, the model decides, and `/gs auto on` is the escape hatch. The open risk is **model compliance** — a small free model that never calls `game_frame` will answer every question blind. Measured, not assumed: see §0 A3.
+- [ ] **A3 accepted:** capture is on demand, the model decides, and `/gs auto off` is the escape hatch. The open risk is **model compliance** — a small free model that never calls `game_frame` will answer every question blind. Measured, not assumed: see §0 A3.
 - [ ] Open decisions **G-O1 … G-O8** are answered.
 - [ ] The competitive-title policy (§9) is accepted as a product constraint.
 - [ ] The owner accepts that this package **cannot** become an overlay without the §11.1 upgrade (an external Tauri host driving pi over RPC).

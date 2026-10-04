@@ -140,10 +140,21 @@ const play = await send({ type: "prompt", message: `/gs play ${GAME}` });
 // The disposition is nested under `data` on a prompt reply, not top level.
 console.log(`/gs play ${GAME} -> ${(play.data as { disposition?: string } | undefined)?.disposition ?? String(play.success)}\n`);
 
+// Half 1 — the default: `/gs auto on`, the model decides.
 for (const [i, { q, needs }] of QUESTIONS.entries()) {
-	console.log(`[${i + 1}] ${needs.padEnd(14)} ${q}`);
+	console.log(`  auto  [${i + 1}] ${needs.padEnd(14)} ${q}`);
 	const answered = await ask(q);
-	if (!answered) console.log("    (timed out waiting for the turn to finish)");
+	if (!answered) console.log("      (timed out waiting for the turn to finish)");
+}
+
+// Half 2 — `/gs auto off`: the decision is taken away, every message is framed.
+console.log("\n/gs auto off — the same questions again");
+await send({ type: "prompt", message: "/gs auto off" });
+await new Promise((r) => setTimeout(r, 800));
+for (const [i, { q }] of QUESTIONS.entries()) {
+	console.log(`  every [${i + 1}] ${q}`);
+	const answered = await ask(q);
+	if (!answered) console.log("      (timed out waiting for the turn to finish)");
 }
 
 const file = [...existingFiles()]
@@ -161,19 +172,28 @@ let toolCaptures = 0;
 let autoMessages = 0;
 let toolResults = 0;
 
-for (const line of readFileSync(file, "utf8").split("\n")) {
-	if (!line.trim()) continue;
+// The file holds both halves of the run, so split it where the player flipped
+// the toggle. Without this the count says nothing about either mode.
+const lines = readFileSync(file, "utf8")
+	.split("\n")
+	.filter((l) => l.trim());
+let switchAt = lines.findIndex((l) => l.includes("/gs auto off"));
+if (switchAt === -1) switchAt = lines.length;
+
+for (const [index, line] of lines.entries()) {
 	const entry = JSON.parse(line) as {
 		type: string;
 		customType?: string;
 		data?: { reason?: string };
 		message?: { role?: string };
 	};
-	if (entry.customType === "gamer_sidekick_frame") {
+	const duringAuto = index < switchAt;
+	if (entry.customType === "gamer_sidekick_frame" && duringAuto) {
 		if (entry.data?.reason === "prompt") autoCaptures++;
 		else toolCaptures++;
 	}
-	// The always-on path attaches a conversation message; it must never fire now.
+	// The always-on path attaches a conversation message; it must never fire
+	// during the auto half, and must fire for every message of the other half.
 	if (entry.type === "custom_message" && entry.customType === "gamer_sidekick_frame") autoMessages++;
 	// pi records a tool return as a `toolResult` message, not a `tool_call`.
 	if (entry.type === "message" && entry.message?.role === "toolResult") toolResults++;
@@ -181,18 +201,20 @@ for (const line of readFileSync(file, "utf8").split("\n")) {
 
 const kb = (n: number) => `${(n / 1024).toFixed(0)} KB`;
 console.log(`\nsession file        : ${kb(statSync(file).size)}`);
-console.log(`questions asked     : ${QUESTIONS.length}`);
+console.log(`questions asked     : ${QUESTIONS.length} in each mode`);
 console.log(`tool results        : ${toolResults}`);
 console.log(`frames via the tool : ${toolCaptures}   (reason: "tool")`);
-console.log(`frames automatically: ${autoCaptures}   (reason: "prompt")`);
-console.log(`auto frame messages : ${autoMessages}   (the /gs auto on path — must be 0)`);
+console.log(`frames as messages  : ${autoMessages}   (reason: "prompt" — the /gs auto off path)`);
 console.log(`status              : ${[...new Set(notices)].slice(-1)[0] ?? "(none)"}`);
 
-const ok = autoCaptures === 0 && autoMessages === 0;
+// `/gs auto on` must never attach a frame on its own; `/gs auto off` must
+// attach one for every single message. Both halves, or the toggle is a lie.
+const ok = autoCaptures === 0 && autoMessages === QUESTIONS.length;
 console.log(
-	`\n${ok ? "PASS" : "FAIL"} — no message captured a frame on its own; every frame came from the model asking.`,
+	`\n${ok ? "PASS" : "FAIL"} — auto: ${autoCaptures} frames attached automatically (want 0); ` +
+		`auto off: ${autoMessages} of ${QUESTIONS.length} messages framed (want ${QUESTIONS.length}).`,
 );
 if (toolCaptures === 0) {
-	console.log("NOTE the model never called game_frame. That is the known cost of A3 — /gs auto on is the fallback.");
+	console.log("NOTE the model never called game_frame. That is the known cost of A3 — /gs auto off is the fallback.");
 }
 process.exit(ok ? 0 : 1);

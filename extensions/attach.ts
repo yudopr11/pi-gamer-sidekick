@@ -118,8 +118,8 @@ export function registerAttachment(
 		// Default path: the model calls `game_frame` if it needs to see. Nothing
 		// is captured, nothing is attached, and the turn is indistinguishable
 		// from one with no game bound at all — which is the cost the player was
-		// asking to avoid.
-		if (!state.alwaysCapture) {
+		// asking to avoid. `/gs auto off` opts back into the old behaviour.
+		if (state.captureMode !== "always") {
 			state.pendingFrame = null;
 			return;
 		}
@@ -206,7 +206,7 @@ export function statusText(state: SidekickState): string | undefined {
 	}
 	// Always-on is a mode the player set deliberately and will notice its
 	// absence when it stops being what they want, so say which one is in force.
-	if (state.alwaysCapture) parts.push(`${dim("·")} every message`);
+	if (state.captureMode === "always") parts.push(`${dim("·")} every message`);
 	if (state.bindingStale) parts.push(`${dim("·")} ${yellow("stale")}`);
 	return parts.join(" ");
 }

@@ -76,6 +76,6 @@ If the question is answerable from a frame, answer from the frame and stop.
 
 - No game bound — `/gs play` picks one. `/gs unbind` clears it. A handle going stale (game closed, window recreated) is reported by `/gs status`; re-run `/gs play`.
 - Black frame — exclusive fullscreen is not capturable. Switch to borderless or windowed, then re-ask. Nothing is lost; the question still gets answered without the frame.
-- `/gs status` says `capture on request only` unless the player has run `/gs auto on`. If the player tells you a frame arrives with every message, they are in auto mode.
+- `/gs status` says `capture on request only` unless the player has run `/gs auto off`, in which case it says `capture every message`. The status line carries the same information: `· every message` when a frame arrives with each turn. If a frame does arrive with every message, do not call `game_frame` — there is nothing left for it to add.
 - Frames cost tokens and accumulate: each stays in the conversation. Do not re-take one of something already visible in an earlier frame.
 - Conversations belong to the player. `/gs` never creates, renames or switches one — if capture seems missing in a different conversation, that conversation simply has no binding yet, and `/gs play` there fixes it.

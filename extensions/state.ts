@@ -71,6 +71,20 @@ export type CaptureFailure =
 	| { kind: "black-frame" }
 	| { kind: "disabled"; reason: string };
 
+/**
+ * Who decides when a frame is taken. PRD A3.
+ *
+ * `auto` is the default and the whole point: the model calls `game_frame` when
+ * the answer depends on the screen, so a question about lore costs nothing.
+ * `always` sends a frame with every message, whether or not it is needed — the
+ * A2 behaviour, kept for anyone who would rather not depend on the model
+ * reaching for the tool.
+ *
+ * `/gs auto on` picks `auto`, `/gs auto off` picks `always`. Read it as "on:
+ * it decides, off: it just does it" — that is what the flag is about.
+ */
+export type CaptureMode = "auto" | "always";
+
 export interface SidekickState {
 	available: boolean;
 	/** Why the package disabled itself (non-Windows, missing native module). */
@@ -115,14 +129,11 @@ export interface SidekickState {
 	framesDropped: number;
 
 	/**
-	 * Capture on every message, or only when the model asks. PRD A3.
+	 * Who decides when a frame is taken. See `CaptureMode` above.
 	 *
-	 * `false` is the point: a question about lore, a build or a boss costs
-	 * nothing, and only a question that depends on the screen spends a capture.
-	 * `true` restores the A2 behaviour for anyone who would rather not depend
-	 * on the model reaching for `game_frame`. `/gs auto on|off` sets it.
+	 * `/gs auto on|off` sets it. One command, one toggle, two meanings.
 	 */
-	alwaysCapture: boolean;
+	captureMode: CaptureMode;
 
 	promptHintShown: boolean;
 
@@ -143,7 +154,7 @@ export function createState(): SidekickState {
 		framesCaptured: 0,
 		framesAttached: 0,
 		framesDropped: 0,
-		alwaysCapture: false,
+		captureMode: "auto",
 		promptHintShown: false,
 		lastError: null,
 	};

@@ -76,7 +76,7 @@ duplicating the image.
 | `/gs setup` | Check that window enumeration and capture both work; report each. |
 | `/gs play` | Pick and bind a window. |
 | `/gs unbind` | Stop capturing. |
-| `/gs auto on\|off` | Capture every message instead of only when the model asks. Default `off`. |
+| `/gs auto [on\|off]` | `on`: it looks when the answer needs the screen (default). `off`: every message carries a frame. |
 | `/gs status` | What is bound, whether it is still alive, capture mode, frame counters. |
 | `/gs frames` | List frames in this conversation with ids, size and token cost. |
 | `/gs display [n]` | Override which display the window is looked for on. |
@@ -127,7 +127,7 @@ What you get in return:
 
 The cost is a round trip on the turns that do need a frame, and the model's
 willingness to reach for the tool. If you would rather not depend on that,
-`/gs auto on` puts a frame on every message the way it worked before, and the
+`/gs auto off` puts a frame on every message the way it worked before, and the
 status line says `· every message` so you know which mode you are in.
 
 ## Looking things up
