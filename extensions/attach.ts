@@ -89,6 +89,7 @@ export function registerAttachment(
 ): void {
 	// --- 1. capture on submit ------------------------------------------------
 	pi.on("before_agent_start", async (event, ctx) => {
+		await state.ready;
 		if (!state.available) return;
 
 		if (!state.binding) {
@@ -166,12 +167,16 @@ export function describeFailure(failure: { kind: string; reason?: string }): str
 
 /** One-line status summary for the footer. PRD §6.6.3. */
 export function statusText(state: SidekickState): string | undefined {
-	if (!state.available) return undefined;
+	if (!state.available) {
+		// `disabledReason` is null while the probe is still running.
+		return state.disabledReason ? "[SIDEKICK · unavailable]" : "[SIDEKICK · starting…]";
+	}
 	if (!state.binding) return "[SIDEKICK · no game bound · /gs play]";
 
 	const b = state.binding;
 	const size = formatSize({ width: b.bounds.width, height: b.bounds.height });
 	const stale = state.bindingStale ? " · stale" : "";
 	const pins = state.pinned.length > 0 ? ` · ${state.pinned.length} pinned` : "";
-	return `[SIDEKICK · ${b.identity.exe} · ${size} · ${state.framesCaptured} frames${pins}${stale}]`;
+	const frames = `${state.framesCaptured} frame${state.framesCaptured === 1 ? "" : "s"}`;
+	return `[SIDEKICK · ${b.identity.exe} · ${size} · ${frames}${pins}${stale}]`;
 }

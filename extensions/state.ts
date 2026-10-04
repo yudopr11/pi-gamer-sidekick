@@ -71,6 +71,17 @@ export interface SidekickState {
 	/** Why the package disabled itself (non-Windows, missing native module). */
 	disabledReason: string | null;
 
+	/**
+	 * Resolves when the startup probe has decided availability.
+	 *
+	 * The probe shells out to PowerShell to build and query the Win32 shim, so
+	 * it takes a beat. Anything that reads `available` — commands, tools, the
+	 * capture hook — must await this first, or it sees the initial
+	 * `available: false, disabledReason: null` and reports the package as
+	 * switched off when it is merely still starting.
+	 */
+	ready: Promise<void>;
+
 	binding: Binding | null;
 	/** True while the binding has been found stale at session start. */
 	bindingStale: boolean;
@@ -100,6 +111,7 @@ export function createState(): SidekickState {
 	return {
 		available: false,
 		disabledReason: null,
+		ready: Promise.resolve(),
 		binding: null,
 		bindingStale: false,
 		frames: [],

@@ -14,6 +14,7 @@ import { gameIdentity } from "./identity.ts";
 import { findSessionFor, isGameSession, listGameSessions, SESSION_PREFIX } from "./sessions.ts";
 import { formatSize, type Binding, type SidekickState } from "./state.ts";
 import {
+	filterWindows,
 	formatWindowChoice,
 	isPickableWindow,
 	listWindows,
@@ -55,6 +56,11 @@ export function registerCommands(pi: ExtensionAPI, state: SidekickState): void {
 		},
 
 		async handler(args: string, ctx: ExtensionCommandContext) {
+			// The startup probe compiles and queries the Win32 shim. Without this
+			// await a command typed immediately after launch reports the package
+			// as switched off when it is only still starting up.
+			await state.ready;
+
 			const [sub = "help", ...rest] = args.trim().split(/\s+/);
 			const arg = rest.join(" ");
 
@@ -100,7 +106,7 @@ export function registerCommands(pi: ExtensionAPI, state: SidekickState): void {
 
 function cmdStatus(state: SidekickState, ctx: ExtensionCommandContext): void {
 	if (!state.available) {
-		ctx.ui.notify(`Gamer Sidekick is off: ${state.disabledReason}`, "error");
+		ctx.ui.notify(`Gamer Sidekick is off: ${state.disabledReason ?? "still starting up"}`, "error");
 		return;
 	}
 	if (!state.binding) {
@@ -186,7 +192,7 @@ async function cmdShot(state: SidekickState, ctx: ExtensionCommandContext): Prom
 
 async function cmdPlay(pi: ExtensionAPI, state: SidekickState, query: string, ctx: ExtensionCommandContext): Promise<void> {
 	if (!state.available) {
-		ctx.ui.notify(`Gamer Sidekick is off: ${state.disabledReason}`, "error");
+		ctx.ui.notify(`Gamer Sidekick is off: ${state.disabledReason ?? "still starting up"}`, "error");
 		return;
 	}
 
@@ -196,12 +202,18 @@ async function cmdPlay(pi: ExtensionAPI, state: SidekickState, query: string, ct
 		return;
 	}
 
-	const ordered = sortWindows(windows, query);
+	const ordered = sortWindows(filterWindows(windows, query), query);
 	// A single match means the user already told us what they meant; do not make
 	// them click it again.
 	let chosen = ordered[0] as WindowInfo;
 	if (ordered.length > 1) {
-		const picked = await ctx.ui.select("Which game window?", ordered.map(formatWindowChoice));
+		const picked = await ctx.ui.select(
+			"Which game window?",
+			ordered.map(formatWindowChoice),
+			// Without a timeout a driver that cannot render the picker (RPC mode,
+			// or an IDE integration) waits forever. The default is "nothing picked".
+			{ timeout: 180_000 },
+		);
 		if (!picked) return;
 		const index = ordered.map(formatWindowChoice).indexOf(picked);
 		chosen = ordered[index] ?? chosen;
@@ -282,6 +294,9 @@ async function ensureGameSession(
 		`Start a ${identity.exe} session?`,
 		`This conversation is not a game session. Each game gets its own conversation so the model does not mix up ` +
 			`games. Starting one leaves this conversation behind.`,
+		// Unanswered means no: leaving the conversation in place is recoverable,
+		// silently abandoning it is not.
+		{ timeout: 180_000 },
 	);
 	if (start) {
 		state.sessionSlug = identity.slug;

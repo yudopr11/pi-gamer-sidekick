@@ -221,6 +221,21 @@ function truncate(s: string, n: number): string {
 	return s.length <= n ? s : `${s.slice(0, n - 1)}…`;
 }
 
+/**
+ * Narrow the picker list to what the query actually names.
+ *
+ * Without this, `/gs play sora_2nd` still opens a menu of every window on the
+ * desktop — the user named the game, so making them pick it again is noise. If
+ * the query matches nothing, fall back to everything so the list still shows
+ * something useful rather than an empty picker.
+ */
+export function filterWindows(windows: WindowInfo[], query: string): WindowInfo[] {
+	const q = query.trim().toLowerCase();
+	if (!q) return windows;
+	const hits = windows.filter((w) => matchesQuery(w, q));
+	return hits.length > 0 ? hits : windows;
+}
+
 /** Picker ordering: exact exe matches first, then largest window. */
 export function sortWindows(windows: WindowInfo[], query: string): WindowInfo[] {
 	const q = query.trim().toLowerCase();
@@ -235,6 +250,9 @@ export function sortWindows(windows: WindowInfo[], query: string): WindowInfo[] 
 }
 
 function matchesQuery(w: WindowInfo, q: string): boolean {
+	// Match the bare filename with and without the extension, and also the full
+	// path — a user reading a crash log or a task manager row pastes the path.
+	const full = (w.owner.path || "").toLowerCase();
 	const exe = basename(w.owner.path || w.owner.name).toLowerCase();
-	return exe === q || exe === `${q}.exe` || exe.includes(q);
+	return exe === q || exe === `${q}.exe` || exe.includes(q) || full.includes(q);
 }

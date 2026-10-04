@@ -8,6 +8,49 @@ import {
 	MAX_LONG_EDGE,
 	MAX_PINNED_FRAMES,
 } from "../extensions/geometry.ts";
+import { filterWindows, type WindowInfo } from "../extensions/windowinfo.ts";
+
+function win(name: string, title: string, width: number, height: number): WindowInfo {
+	return {
+		title,
+		id: Math.abs(name.length * 7919),
+		bounds: { x: 0, y: 0, width, height },
+		owner: { name, processId: 1, path: `C:/games/${name}` },
+		pid: 1,
+		minimized: false,
+		maximized: false,
+	};
+}
+
+const WINDOWS: WindowInfo[] = [
+	win("sora_2nd.exe", "Trails in the Sky 2nd Chapter", 2560, 1440),
+	win("Nahimic3.exe", "Nahimic", 1680, 798),
+	win("eldenring.exe", "ELDEN RING", 2560, 1440),
+];
+
+test("filterWindows narrows to a named exe so the picker can be skipped", () => {
+	const hits = filterWindows(WINDOWS, "sora_2nd");
+	assert.equal(hits.length, 1);
+	assert.equal(hits[0]?.owner.name, "sora_2nd.exe");
+});
+
+test("filterWindows accepts a name with or without the .exe suffix", () => {
+	assert.equal(filterWindows(WINDOWS, "eldenring").length, 1);
+	assert.equal(filterWindows(WINDOWS, "eldenring.exe").length, 1);
+});
+
+test("filterWindows matches a full path fragment", () => {
+	assert.equal(filterWindows(WINDOWS, "games/sora").length, 1);
+});
+
+test("filterWindows falls back to the full list when nothing matches", () => {
+	// A full picker beats an empty one.
+	assert.equal(filterWindows(WINDOWS, "cyberpunk").length, WINDOWS.length);
+});
+
+test("filterWindows passes everything through for an empty query", () => {
+	assert.equal(filterWindows(WINDOWS, "   ").length, WINDOWS.length);
+});
 
 test("scales a 1080p frame down to the long edge", () => {
 	assert.deepEqual(fitLongEdge({ width: 1920, height: 1080 }), { width: 1280, height: 720 });

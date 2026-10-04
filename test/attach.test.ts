@@ -77,6 +77,7 @@ function fakePi() {
 function boundState(): SidekickState {
 	const s = createState();
 	s.available = true;
+	s.ready = Promise.resolve();
 	s.binding = {
 		hwnd: 1,
 		identity: { exe: "sora_2nd.exe", slug: "sora-1", sessionName: "gamer-sidekick/sora-1", ownerPath: "C:/sora_2nd.exe" },
@@ -167,6 +168,28 @@ describe("frame attachment", () => {
 		assert.equal(second, undefined, "already-injected frame must not be injected again");
 	});
 
+	it("waits for the startup probe before deciding to stay silent", async () => {
+		// Regression: the probe is fire-and-forget, so a command typed straight
+		// after launch used to see available:false / reason:null and report the
+		// package as switched off when it was only still starting up.
+		const state = createState();
+		const { pi, fire, appended } = fakePi();
+		registerAttachment(pi, state, async () => okCapture(makeFrame(1)));
+
+		let release!: () => void;
+		state.ready = new Promise<void>((r) => (release = r));
+		state.binding = boundState().binding;
+
+		const pending = fire("before_agent_start", { type: "before_agent_start", prompt: "q" });
+		assert.equal(appended.length, 0, "must not capture while the probe is still running");
+
+		state.available = true;
+		release();
+		await pending;
+
+		assert.equal(appended.length, 1, "the turn still captures once the probe resolves");
+	});
+
 	it("never blocks the turn when capture fails", async () => {
 		const state = boundState();
 		const { pi, fire, appended } = fakePi();
@@ -184,6 +207,7 @@ describe("frame attachment", () => {
 	it("hints once, then stays quiet, when no window is bound", async () => {
 		const state = createState();
 		state.available = true;
+		state.ready = Promise.resolve();
 		const { pi, fire, notified } = fakePi();
 		let called = 0;
 		registerAttachment(pi, state, async () => {

@@ -30,9 +30,10 @@ export default function gamerSidekick(pi: ExtensionAPI): void {
 	const state: SidekickState = createState();
 
 	// --- availability probe --------------------------------------------------
-	// Deliberately not awaited: extension loading must not block on a native
-	// import. The tools gate themselves until this resolves.
-	void probe(state);
+	// Not awaited at load time — extension loading must not block on a native
+	// import. Everything that reads `state.available` awaits `state.ready`
+	// instead, so nobody observes the "still starting" state.
+	state.ready = probe(state);
 
 	registerCommands(pi, state);
 	registerTools(pi, state);
@@ -42,7 +43,8 @@ export default function gamerSidekick(pi: ExtensionAPI): void {
 	// Injected at `before_agent_start` rather than `session_start` because that
 	// hook hands back the base prompt to rebuild from. Rewriting the prompt on
 	// every turn is what keeps the section in sync with the bound window.
-	pi.on("before_agent_start", (event, ctx) => {
+	pi.on("before_agent_start", async (event, ctx) => {
+		await state.ready;
 		if (!state.available || !state.binding) return;
 
 		const base = ctx.getSystemPrompt();
@@ -53,6 +55,8 @@ export default function gamerSidekick(pi: ExtensionAPI): void {
 
 	// --- session lifecycle ---------------------------------------------------
 	pi.on("session_start", async (_event, ctx) => {
+		await state.ready;
+
 		// A session switch invalidates the binding: the new session has no frame
 		// ledger and the old window may not be the game the player is now in.
 		if (state.sessionSlug !== null) resetSessionState(state);
@@ -70,7 +74,8 @@ export default function gamerSidekick(pi: ExtensionAPI): void {
 		}
 	});
 
-	pi.on("turn_end", (_event, ctx) => {
+	pi.on("turn_end", async (_event, ctx) => {
+		await state.ready;
 		ctx.ui.setStatus("gamer-sidekick", statusText(state));
 	});
 }

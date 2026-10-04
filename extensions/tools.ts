@@ -28,8 +28,14 @@ interface GameFrameDetails {
 }
 
 /** Is this tool worth exposing right now? */
-function activeTool(state: SidekickState): { active: boolean; reason: string } {
-	if (!state.available) return { active: false, reason: "screen capture is unavailable on this machine" };
+async function activeTool(state: SidekickState): Promise<{ active: boolean; reason: string }> {
+	await state.ready;
+	if (!state.available) {
+		// `disabledReason` is null while the probe is still running, so the reason
+		// text has to distinguish "switched off" from "not ready yet".
+		const why = state.disabledReason ?? "still starting up";
+		return { active: false, reason: `screen capture is unavailable on this machine (${why})` };
+	}
 	if (!state.binding) return { active: false, reason: "no game window is bound — run /gs play" };
 	return { active: true, reason: "" };
 }
@@ -57,7 +63,7 @@ export function registerTools(pi: ExtensionAPI, state: SidekickState): void {
 		}),
 
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			const gate = activeTool(state);
+			const gate = await activeTool(state);
 			if (!gate.active) {
 				return {
 					content: [{ type: "text", text: `No frame captured: ${gate.reason}.` }],
@@ -148,8 +154,8 @@ export function registerTools(pi: ExtensionAPI, state: SidekickState): void {
 	// is read-modify-write rather than assigned: other extensions' tools must
 	// survive us toggling these two.
 	const GS_TOOLS = ["game_frame", "game_window"];
-	pi.on("before_agent_start", () => {
-		const gate = activeTool(state);
+	pi.on("before_agent_start", async () => {
+		const gate = await activeTool(state);
 		const next = new Set(pi.getActiveTools());
 		const before = next.size;
 		for (const name of GS_TOOLS) {
