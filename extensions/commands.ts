@@ -31,14 +31,15 @@ const HELP = [
 	"  /gs play [exe]    bind a window to capture",
 	"  /gs status        what is bound, and what has been captured",
 	"  /gs frames        frames captured in this conversation",
+	"  /gs auto <on|off> capture every message, or only when it is asked for",
 	"  /gs display <n>   look for the window on display <n>",
 	"  /gs setup         check that window capture works on this machine",
 	"  /gs unbind        stop capturing",
 	"  /gs help          this list",
 	"",
 	"A binding lives in one conversation, so a new one needs its own /gs play.",
-	"While a window is bound, every message you send carries a frame of it —",
-	"about 150 KB of session file and ~600 image tokens of context per frame.",
+	"By default nothing is photographed until the answer needs the screen.",
+	"Each frame costs about 150 KB of session file and ~600 image tokens.",
 ].join("\n");
 
 export function registerCommands(pi: ExtensionAPI, state: SidekickState): void {
@@ -46,10 +47,11 @@ export function registerCommands(pi: ExtensionAPI, state: SidekickState): void {
 		description: "Gamer Sidekick — brings the game you are playing into your conversation",
 		getArgumentCompletions(prefix) {
 			const subs = [
-				"play", "status", "frames", "display", "setup", "unbind", "help",
+				"play", "status", "frames", "auto", "display", "setup", "unbind", "help",
 			];
 			const hits = subs.filter((s) => s.startsWith(prefix));
-			return hits.length > 0 ? hits.map((value) => ({ value, label: value })) : null;
+			if (hits.length === 0) return null;
+			return hits.map((value) => ({ value, label: value }));
 		},
 
 		async handler(args: string, ctx: ExtensionCommandContext) {
@@ -103,6 +105,8 @@ async function runSubcommand(
 			return cmdUnbind(state, ctx);
 		case "frames":
 			return cmdFrames(state, ctx);
+		case "auto":
+			return cmdAuto(state, arg, ctx);
 		case "display":
 			return cmdDisplay(state, arg, ctx);
 		default:
@@ -132,9 +136,37 @@ function cmdStatus(state: SidekickState, ctx: ExtensionCommandContext): void {
 		`display   ${b.displayOverride ?? b.display?.index ?? "?"}${b.display ? `  ${b.display.width}x${b.display.height} at (${b.display.x},${b.display.y})` : ""}`,
 		`bound     ${new Date(b.boundAt).toLocaleString()}`,
 		`frames    ${state.framesCaptured} in this conversation · ${state.framesAttached} attached this run · ${state.framesDropped} dropped this run`,
+		`capture   ${state.alwaysCapture ? "every message" : "on request only"}`,
 	];
 	if (state.lastError) lines.push(`last err  ${state.lastError}`);
 	ctx.ui.notify(lines.join("\n"), state.bindingStale ? "warning" : "info");
+}
+
+/**
+ * `/gs auto on|off` — the escape hatch for A3.
+ *
+ * On-demand capture asks the model to reach for a tool, which is the right
+ * default but not one every player wants to depend on. Turning it on restores
+ * the A2 behaviour exactly: a frame with every message, whether or not it is
+ * needed.
+ */
+function cmdAuto(state: SidekickState, arg: string, ctx: ExtensionCommandContext): void {
+	const want = arg.trim().toLowerCase();
+	if (want !== "on" && want !== "off") {
+		ctx.ui.notify(
+			`Capturing ${state.alwaysCapture ? "every message" : "only when the answer needs the screen"}. Usage: /gs auto on|off`,
+			"info",
+		);
+		return;
+	}
+
+	state.alwaysCapture = want === "on";
+	ctx.ui.notify(
+		state.alwaysCapture
+			? "Every message will carry a frame of the game window. That is ~150 KB of session file and ~600 image tokens per message."
+			: "Frames will be taken only when the answer needs the screen. Messages that do not will cost nothing.",
+		"info",
+	);
 }
 
 async function cmdSetup(state: SidekickState, ctx: ExtensionCommandContext): Promise<void> {

@@ -1,12 +1,11 @@
 /**
- * Tests for the frame attachment hook — the load-bearing mechanism (PRD §6.3.2,
- * amendment A2).
+ * Tests for the frame attachment hook (PRD §6.3.2, amended by A2, reversed by A3).
  *
- * The frame is returned from `before_agent_start` as a custom message, which is
- * what puts it in the normal conversation: pi appends it after the player's
- * question, converts it to a user message for the provider, persists it, and
- * renders it. So the two things worth asserting are that the returned message
- * carries the image, and that the metadata entry beside it does not.
+ * A2 put the frame in the conversation unconditionally. A3 stops: by default the
+ * model calls `game_frame` when a question depends on the screen, and the hook
+ * captures only when `/gs auto` has put it back on always-on. So the tests split
+ * by mode — the `alwaysCapture` suite is the old behaviour kept alive as a
+ * fallback, and the on-demand suite is the default.
  *
  * The capture step is injected so these tests need neither Windows nor a game.
  */
@@ -71,10 +70,11 @@ function fakePi() {
 	return { pi, fire, appended, notified };
 }
 
-function boundState(): SidekickState {
+function boundState(options: { alwaysCapture?: boolean } = {}): SidekickState {
 	const s = createState();
 	s.available = true;
 	s.ready = Promise.resolve();
+	s.alwaysCapture = options.alwaysCapture ?? false;
 	s.binding = {
 		hwnd: 1,
 		identity: { exe: "sora_2nd.exe", slug: "sora-1", ownerPath: "C:/sora_2nd.exe" },
@@ -94,9 +94,93 @@ const failCapture = (kind: "minimized" | "black-frame"): CaptureOutcome => ({
 	elapsedMs: 12,
 });
 
-describe("frame attachment", () => {
-	it("captures on submit and appends metadata only", async () => {
+describe("on-demand capture — the default", () => {
+	it("captures nothing when the model is expected to ask for what it needs", async () => {
 		const state = boundState();
+		const { pi, fire, appended } = fakePi();
+		let captures = 0;
+		registerAttachment(pi, state, async () => {
+			captures++;
+			return okCapture(makeFrame(1));
+		});
+
+		await fire("before_agent_start", {
+			type: "before_agent_start",
+			prompt: "who is Oliver and what does the AT bar do?",
+		});
+
+		assert.equal(captures, 0, "a lore question must cost nothing");
+		assert.equal(appended.length, 0);
+		assert.equal(state.framesCaptured, 0);
+		assert.equal(state.framesAttached, 0);
+		assert.equal(state.framesDropped, 0);
+		assert.equal(state.pendingFrame, null);
+	});
+
+	it("returns no message, so the turn is byte-identical to an unbound one", async () => {
+		const state = boundState();
+		const { pi, fire } = fakePi();
+		registerAttachment(pi, state, async () => okCapture(makeFrame(1)));
+
+		const [result] = await fire("before_agent_start", { type: "before_agent_start", prompt: "q" });
+
+		assert.equal(result, undefined);
+	});
+
+	it("survives many questions without accumulating anything", async () => {
+		const state = boundState();
+		const { pi, fire, appended } = fakePi();
+		let captures = 0;
+		registerAttachment(pi, state, async () => {
+			captures++;
+			return okCapture(makeFrame(captures));
+		});
+
+		for (let i = 0; i < 5; i++) {
+			await fire("before_agent_start", { type: "before_agent_start", prompt: `q${i}` });
+		}
+
+		assert.equal(captures, 0);
+		assert.equal(appended.length, 0);
+		assert.equal(state.frames.length, 0);
+	});
+
+	it("still hints once when nothing is bound", async () => {
+		const state = createState();
+		state.available = true;
+		state.ready = Promise.resolve();
+		const { pi, fire, notified } = fakePi();
+		registerAttachment(pi, state, async () => okCapture(makeFrame(1)));
+
+		await fire("before_agent_start", { type: "before_agent_start", prompt: "a" });
+		await fire("before_agent_start", { type: "before_agent_start", prompt: "b" });
+
+		assert.equal(notified.length, 1);
+		assert.match(notified[0] ?? "", /\/gs play/);
+	});
+
+	it("restores a binding mid-conversation even though it no longer captures", async () => {
+		// The restore has to stay on this hook. It is the one place that runs
+		// before every turn, and a resumed conversation arrives with an empty
+		// state and no way to know a window was bound.
+		const state = createState();
+		state.available = true;
+		state.ready = Promise.resolve();
+		const { pi, fire } = fakePi();
+		registerAttachment(pi, state, async () => okCapture(makeFrame(1)));
+
+		await fire("before_agent_start", { type: "before_agent_start", prompt: "q" });
+		assert.equal(state.binding, null);
+
+		state.binding = boundState().binding;
+		await fire("before_agent_start", { type: "before_agent_start", prompt: "q" });
+		assert.equal(state.binding?.identity.exe, "sora_2nd.exe");
+	});
+});
+
+describe("always-on capture — the /gs auto fallback", () => {
+	it("captures on submit and appends metadata only", async () => {
+		const state = boundState({ alwaysCapture: true });
 		const { pi, fire, appended } = fakePi();
 		registerAttachment(pi, state, async () => okCapture(makeFrame(1)));
 
@@ -113,7 +197,7 @@ describe("frame attachment", () => {
 	});
 
 	it("returns the frame as a conversation message", async () => {
-		const state = boundState();
+		const state = boundState({ alwaysCapture: true });
 		const { pi, fire } = fakePi();
 		registerAttachment(pi, state, async () => okCapture(makeFrame(1)));
 
@@ -149,12 +233,13 @@ describe("frame attachment", () => {
 		// after launch used to see available:false / reason:null and report the
 		// package as switched off when it was only still starting up.
 		const state = createState();
+		state.alwaysCapture = true;
 		const { pi, fire, appended } = fakePi();
 		registerAttachment(pi, state, async () => okCapture(makeFrame(1)));
 
 		let release!: () => void;
 		state.ready = new Promise<void>((r) => (release = r));
-		state.binding = boundState().binding;
+		state.binding = boundState({ alwaysCapture: true }).binding;
 
 		const pending = fire("before_agent_start", { type: "before_agent_start", prompt: "q" });
 		assert.equal(appended.length, 0, "must not capture while the probe is still running");
@@ -167,7 +252,7 @@ describe("frame attachment", () => {
 	});
 
 	it("never blocks the turn when capture fails", async () => {
-		const state = boundState();
+		const state = boundState({ alwaysCapture: true });
 		const { pi, fire, appended } = fakePi();
 		registerAttachment(pi, state, async () => failCapture("black-frame"));
 
@@ -180,27 +265,8 @@ describe("frame attachment", () => {
 		assert.equal(state.pendingFrame, null);
 	});
 
-	it("hints once, then stays quiet, when no window is bound", async () => {
-		const state = createState();
-		state.available = true;
-		state.ready = Promise.resolve();
-		const { pi, fire, notified } = fakePi();
-		let called = 0;
-		registerAttachment(pi, state, async () => {
-			called++;
-			return okCapture(makeFrame(1));
-		});
-
-		await fire("before_agent_start", { type: "before_agent_start", prompt: "a" });
-		await fire("before_agent_start", { type: "before_agent_start", prompt: "b" });
-
-		assert.equal(called, 0, "must not attempt a capture with nothing bound");
-		assert.equal(notified.length, 1);
-		assert.match(notified[0] ?? "", /\/gs play/);
-	});
-
 	it("keeps capturing once a window is bound", async () => {
-		const state = boundState();
+		const state = boundState({ alwaysCapture: true });
 		const { pi, fire } = fakePi();
 		registerAttachment(pi, state, async () => okCapture(makeFrame(2)));
 

@@ -114,6 +114,16 @@ export interface SidekickState {
 	framesAttached: number;
 	framesDropped: number;
 
+	/**
+	 * Capture on every message, or only when the model asks. PRD A3.
+	 *
+	 * `false` is the point: a question about lore, a build or a boss costs
+	 * nothing, and only a question that depends on the screen spends a capture.
+	 * `true` restores the A2 behaviour for anyone who would rather not depend
+	 * on the model reaching for `game_frame`. `/gs auto on|off` sets it.
+	 */
+	alwaysCapture: boolean;
+
 	promptHintShown: boolean;
 
 	lastError: string | null;
@@ -133,6 +143,7 @@ export function createState(): SidekickState {
 		framesCaptured: 0,
 		framesAttached: 0,
 		framesDropped: 0,
+		alwaysCapture: false,
 		promptHintShown: false,
 		lastError: null,
 	};

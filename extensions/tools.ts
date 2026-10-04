@@ -1,11 +1,21 @@
 /**
  * The two model-facing tools. PRD §6.6.2.
  *
- * `game_frame` exists because the automatic capture is a snapshot of the moment
- * the player pressed Enter. By the time the model has thought for four seconds
- * and started asking "what does the minimap show?", the game has moved on. This
- * tool is how it re-synchronises, and it is the only way it sees something the
- * player did not ask about.
+ * **A3 turned `game_frame` from a re-sync into the only way to see.** It used to
+ * be a way to catch up with a game that had moved on since the frame attached
+ * to the message. Now nothing attaches: the package captures when the model
+ * calls this tool, and stays silent otherwise. Two things fell out of that
+ * worth keeping in mind.
+ *
+ * First, the description below is load-bearing rather than decorative. A model
+ * that does not know *when* to spend a capture will either never call it or call
+ * it every turn, and both failures are worse than the behaviour this replaced.
+ *
+ * Second, this is now the only path that returns an image as a tool result —
+ * and pi renders tool results in the terminal. pi's CustomMessageComponent
+ * drops the image blocks of a custom message, so the automatic capture reached
+ * the model but never the player. Asking for a frame is how the player actually
+ * sees one.
  */
 
 import { Type } from "typebox";
@@ -13,7 +23,8 @@ import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { captureFrame } from "./capture.ts";
 import { captionFor } from "./frames.ts";
 import { describeFailure } from "./attach.ts";
-import type { SidekickState } from "./state.ts";
+import { FRAME_ENTRY } from "./ledger.ts";
+import { formatSize, type SidekickState } from "./state.ts";
 
 interface GameFrameDetails {
 	/** Set when no frame could be captured; every other field is then absent. */
@@ -24,6 +35,8 @@ interface GameFrameDetails {
 	elapsedMs?: number;
 	bytes?: number;
 	imageTokens?: number;
+	/** How the frame was taken — "tool" now that capture is the model's call. */
+	reason?: string;
 }
 
 /** Is this tool worth exposing right now? */
@@ -39,18 +52,30 @@ async function activeTool(state: SidekickState): Promise<{ active: boolean; reas
 	return { active: true, reason: "" };
 }
 
-export function registerTools(pi: ExtensionAPI, state: SidekickState): void {
+export function registerTools(
+	pi: ExtensionAPI,
+	state: SidekickState,
+	// Injectable so the tests can drive the tool without a Windows desktop.
+	capture: typeof captureFrame = captureFrame,
+): void {
 	// --- game_frame ----------------------------------------------------------
 	const gameFrame = defineTool({
 		name: "game_frame",
 		label: "Game Frame",
 		description:
-			"Grab a fresh screenshot of the bound game window right now. Use this when the player asks about something " +
-			"the automatic capture may have missed, or when you need to re-synchronise with the current game state. " +
-			"Only works while a game window is bound.",
-		promptSnippet: "game_frame: grab a fresh screenshot of the bound game window",
+			"Take a fresh screenshot of the game window the player is looking at, right now. " +
+			"No frame arrives with the message, so this is how you see anything at all. " +
+			"Call it when the answer depends on what is on screen right now — what just happened, " +
+			"where the player is, what a menu or status screen says, or what changed since the last frame. " +
+			"Answer without calling it when the question is about lore, a build, an item recipe, a boss strategy " +
+			"or who a character is, or when an earlier frame already answers it. Only works while a game window " +
+			"is bound; if it fails, say so and answer from what the player told you.",
+		promptSnippet: "game_frame: screenshot the player's game window, on demand",
 		promptGuidelines: [
-			"Prefer the automatically attached frame over calling game_frame — call it when the attached frame is stale or you need to look at something the player did not ask about.",
+			"Call game_frame when your answer depends on what is on screen at this moment — the scene just described, a location, a menu, a status screen, a change since the last frame.",
+			"Answer without calling it — the player pays nothing for that turn — when the question is about lore, builds, recipes, strategy or who someone is, or when an earlier frame already answers it.",
+			"An earlier frame is a snapshot of an earlier moment. Say \"since the last frame\" or re-check when the game has probably moved on.",
+			"If game_frame fails or no window is bound, tell the player and answer from what they said. Never describe a screen you did not see.",
 		],
 		annotations: { readOnlyHint: true, openWorldHint: false },
 		parameters: Type.Object({}),
@@ -64,7 +89,7 @@ export function registerTools(pi: ExtensionAPI, state: SidekickState): void {
 				};
 			}
 
-			const outcome = await captureFrame(state);
+			const outcome = await capture(state);
 			if (!outcome.ok) {
 				const reason = describeFailure(outcome.failure);
 				// A missing frame is information, not a crash. The model should tell
@@ -77,6 +102,10 @@ export function registerTools(pi: ExtensionAPI, state: SidekickState): void {
 
 			state.framesAttached++;
 			const frame = outcome.frame;
+			// A tool result is not a conversation message, so nothing else in the
+			// transcript describes this frame. Without an entry here the ledger
+			// rebuilds from zero on the next process and `/gs frames` forgets it.
+			pi.appendEntry(FRAME_ENTRY, { ...frame.record, reason: "tool" });
 			return {
 				content: [
 					{ type: "text", text: captionFor(frame) },
@@ -89,6 +118,7 @@ export function registerTools(pi: ExtensionAPI, state: SidekickState): void {
 					elapsedMs: outcome.elapsedMs,
 					bytes: frame.record.bytes,
 					imageTokens: frame.record.imageTokens,
+					reason: "tool",
 				} satisfies GameFrameDetails,
 			};
 		},
@@ -128,8 +158,9 @@ export function registerTools(pi: ExtensionAPI, state: SidekickState): void {
 					{
 						type: "text",
 						text:
-							`Bound window: ${b.identity.exe} "${b.title}" ${b.bounds.width}x${b.bounds.height} on display ${details.displayIndex}. ` +
-							`${state.framesCaptured} frame(s) captured in this conversation.`,
+							`Bound window: ${b.identity.exe} "${b.title}" ${formatSize(b.bounds)} on display ${details.displayIndex}. ` +
+							`${state.framesCaptured} frame(s) captured in this conversation. ` +
+							`${state.alwaysCapture ? "Every message is being captured automatically." : "Frames are captured only when you call game_frame."}`,
 					},
 				],
 				details,

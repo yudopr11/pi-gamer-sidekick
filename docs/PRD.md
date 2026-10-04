@@ -16,7 +16,7 @@
 | Default model | **Cheapest vision-capable model available in pi.** Recommended `gpt-6-luna` ($0.10 in / $0.50 out per 1M) |
 | Intended games | **Single-player, offline, and PvE/co-op titles. Not competitive or online multiplayer (§9).** |
 | Repository | `git`, branch `main`, package root is the repo root |
-| Amendment | **A2 (owner, 2026-10-04)** — frames are ordinary conversation messages; `/gs pin`, `/gs unpin` and `/gs shot` are **withdrawn**. See [§0 Amendments](#0-amendments). |
+| Amendment | **A3 (owner, 2026-10-04)** — capture happens when the model asks for it; nothing is photographed per message. See [§0 Amendments](#0-amendments). |
 
 ---
 
@@ -107,13 +107,76 @@ custom entries at `session_start`, before each `/gs` subcommand and before each
 turn's capture. `framesCaptured` is a monotonic conversation total;
 `/gs status` splits it from the per-run attached/dropped counters so "1 in this
 conversation · 0 attached this run" is unambiguous.
+
+### A3 — The model asks for frames; nothing is photographed per message (owner decision, 2026-10-04)
+
+**Withdrawn:** the per-message automatic capture. `before_agent_start` no longer
+captures and no longer returns a frame message. With one exception — `/gs auto
+on`, which restores A2 exactly — `game_frame` is the only path to a frame.
+
+**Why.** Three consecutive messages in one sitting produced three frames of the
+same room with only the tips box changed: ~595 image tokens and ~150 KB of
+session file each, to tell the model something it could read in the previous
+frame. The player asked for capture "only when really needed, or when [the
+question] specifically asks what happened in the game".
+
+**Why not a keyword heuristic.** Whether a question depends on the screen is a
+property of the question, not of the words in it. A match in the extension is a
+guess, and its failure mode is silent and unrecoverable: a false negative means
+the model answers confidently from stale context with no idea it is blind. The
+model is the only party that can make this call reliably, and it can be told
+what the call is.
+
+**What it means now.**
+
+- `game_frame`'s description and `promptGuidelines` carry the trigger list
+  (*what just happened, where am I, what does this menu/stat screen say, what
+  changed since the last frame*) and the non-trigger list (*lore, builds,
+  recipes, strategy, who a character is, or an earlier frame already answers
+  it*). This text is load-bearing, not decoration.
+- A frame taken through the tool is appended as a **metadata-only** ledger entry
+  with `reason: "tool"`. A tool result is not a conversation message, so nothing
+  else in the transcript describes it — without the entry the ledger would
+  rebuild from zero in the next process and `/gs frames` would forget it.
+- `/gs auto on|off` is the escape hatch. Default `off`. `/gs status` reports the
+  mode; the status line appends `· every message` when it is on.
+- `alwaysCapture: boolean` on `SidekickState`, default `false`.
+
+**The bonus.** A2's correction — that pi renders only the *text* blocks of a
+custom message — made a picture on screen impossible from the automatic path.
+A tool result **is** rendered. Asking for the frame is therefore the first
+mechanism in this package where the player actually sees the game.
+
+**The cost, stated plainly.** A turn that needs a frame costs an extra round
+trip. And the whole thing depends on the model reaching for the tool; with a
+small free model, compliance is the weak point. `/gs auto on` is the fallback
+for anyone who will not accept that dependency.
+
+**Measured** (live, `scratch/probe-ondemand.ts`, three questions — two about the
+game, one about the screen — against Trails in the Sky 2nd Chapter):
+
+```
+tool results        : 3          (1 game_window, 2 game_frame)
+frames via the tool : 2          (reason: "tool")
+frames automatically: 0          (reason: "prompt")
+auto frame messages : 0          (the /gs auto on path — must be 0)
+status              : ● Sidekick sora_2nd.exe · 2560×1440 · 2 frames
+```
+
+Both tool results came back `text+image`, and the two game-knowledge questions
+were answered without a frame at all.
+
+**Superseded:** §6.3.2's capture-on-submit, §6.4 (entirely), E8, G-D5, the A2
+"what it means now" list, and the §6.6.2 claim that the tool exists to
+re-synchronise with a stale automatic frame.
+
 ---
 
 ## 1. What This Is — TL;DR
 
 **Gamer Sidekick is a pi package that teaches pi to see your game.**
 
-You keep pi open in a second window. You alt-tab to it, type a question about the game you are playing, press `Enter`. The package captures the current frame of the game window you bound to this session, attaches it to your question as an image, and pi answers it with a vision model — streamed, with per-game conversation memory and automatic context compaction.
+You keep pi open in a second window. You alt-tab to it, type a question about the game you are playing, press `Enter`. When the answer depends on what is on screen, pi takes a frame of the game window you bound to this session and answers with a vision model — streamed, with conversation memory and automatic context compaction. When it does not, the frame is never taken and the turn costs nothing.
 
 ```
   Elden Ring (1920x1080)          pi (terminal)
@@ -372,15 +435,21 @@ nothing to be ambiguous about. Resolution:
 
 ### 6.3 Frame Attachment — the core mechanism
 
-#### 6.3.0 Mechanism — **REVISED by A2**
+#### 6.3.0 Mechanism — **REVISED by A2, then INVERTED by A3**
 
-§6.3.2 below argues for the request-local `context` hook. It was the right call
-at the time and it is **no longer what ships**: the player asked for frames to be
-ordinary conversation messages, which means they are persisted and survive a
-`/resume`. Kept because the reasoning — and the cost it accepted — is the record
-of that decision.
+**What ships:** the model calls `game_frame`. Nothing is captured on submit. The
+`before_agent_start` hook still exists, but only to re-read the binding and the
+ledger, and — when the player has run `/gs auto on` — to capture the A2 way.
 
-#### 6.3.1 When the frame is taken
+§6.3.1 and §6.3.2 below describe the design as it was. They are kept because the
+reasoning — and the two costs it accepted — are the record of two decisions that
+have since been undone, and undoing them without the record is how a spec rots.
+
+#### 6.3.1 When the frame is taken — **SUPERSEDED by A3**
+
+> A3: not on submit. The frame is taken when the model calls `game_frame`
+> (§6.6.2), which is inside the agent loop rather than before it. The table below
+> describes the capture-on-submit design that shipped between A2 and A3.
 
 `before_agent_start` — fired after the user submits a prompt, before the agent loop, carrying `event.prompt: string` and `event.images?: ImageContent[]`.
 
@@ -390,7 +459,11 @@ of that decision.
 | Ordering | Capture is awaited before the handler returns, so the frame is in hand before the model request is built |
 | Cost control | If the bound model does not accept image input, skip capture entirely and tell the user why (`/gs models` lists which are vision-capable) |
 
-#### 6.3.2 How the frame reaches the model — and why it is *not* the obvious way
+#### 6.3.2 How the frame reaches the model — **WITHDRAWN (A2) and never shipped**
+
+> The `context` hook below is the mechanism A2 reversed. A3 withdraws it again,
+> for a different reason: there is no injection left to describe, because the
+> model asks for the frame and the tool result carries it.
 
 `BeforeAgentStartEventResult` accepts `message?: Pick<CustomMessage, "customType" | "content" | "display" | "details">`, and `CustomMessage.content` accepts `ImageContent[]`. So attaching the image to the user message *is* possible. **It is also wrong**, because pi persists user messages into the session file — which would write ~330 KB of base64 per turn to disk, violating INV-2 and bloating every session file on the machine.
 
@@ -407,18 +480,22 @@ Instead, the frame is injected at the **`context`** event:
 
 **Result:** full vision capability, zero image bytes on disk, and a transcript that reads `[FRAME #014 · eldenring.exe]` forever after.
 
-#### 6.3.3 Frame budget
+#### 6.3.3 Frame budget — **REVISED by A3**
 
 A vision model will happily accept fifty 1280px screenshots. The user cannot afford that and does not need it.
 
 | Rule | Value | Rationale |
 | --- | --- | --- |
-| Live frames in context | **1** — the current turn's frame only | One frame is what the question is about |
-| Pinned frames | **3** maximum, LRU-evicted with a visible notice | "Compare this to what I showed you earlier" |
-| Frames before compaction is offered | 2 | Compaction (§6.9) summarises frames away with everything else |
-| Frames in one turn | 1, unless the model calls `game_frame` (§6.6) | |
+| Frames per turn | **0** on the default path | The model asks when the answer needs one |
+| Frames per turn, `/gs auto on` | 1 | One frame is what the question is about |
+| Frames held in memory for the ledger | 50 rows, metadata only | `/gs frames` only ever needs the recent tail |
+| Frames in the transcript | every frame ever taken, on demand | They stay in the conversation so `/resume` keeps them; `/compact` is the release valve |
 
-Approximate cost at `gpt-6-luna`: a 1280px image ≈ 1,100 input tokens ≈ **$0.00011** per frame. Immaterial; the budget is about context coherence, not money.
+Pinning and the live-frame budget are **withdrawn** (§6.4). A budget only made
+sense when capture was unconditional; on demand, the model is already the
+budget.
+
+Approximate cost at `gpt-6-luna`: a 1280px image ≈ 595 image tokens ≈ **$0.00006** per frame. Immaterial; the argument for A3 was the player's latency and session-file growth, not money.
 
 ---
 
@@ -475,10 +552,9 @@ All of this is pi functionality; Gamer Sidekick only calls it.
 | --- | --- |
 | `/gs play [exe\|n]` | Bind a game window (§6.1.2) |
 | `/gs unbind` | Stop capturing; session becomes text-only |
+| `/gs auto <on\|off>` | Capture every message, or only when the model asks (§0 A3). Default `off` |
 | `/gs display <n>` | Override the display used for capture (§6.2.3) |
-| `/gs shot` | Capture a frame now, attach it, and ask the model to describe it |
-| `/gs pin [id]` / `/gs pins` / `/gs unpin [id]` | Frame pinning (§6.4) |
-| `/gs frames` | Table of captured frames this session: id, exe, size, bytes, timestamp, pinned? |
+| `/gs frames` | Table of frames captured in this conversation: id, exe, size, bytes, timestamp |
 | *(none)* | Session management is the player's, via pi's own `/resume` (§0 A1) |
 | `/gs models` | List pi's models, marking which accept image input, cheapest first |
 | `/gs status` | Bound window, display, model, thinking level, context usage, frames this session, estimated image tokens |
@@ -491,12 +567,26 @@ Aliases: `/gamer` and `/sidekick` resolve to `/gs`.
 
 | Tool | Parameters | Behaviour | Notes |
 | --- | --- | --- | --- |
-| `game_frame` | `{ reason?: string }` | Captures a new frame and returns metadata | Image is injected by the `context` handler (§6.3.2); the tool result is text + `details` only, so no pixels reach the transcript |
-| `game_window` | `{}` | Returns bound window: exe, title, bounds, display, whether stale | Read-only |
+| `game_frame` | `{}` | **The** capture path (§0 A3): captures a frame and returns caption + image | The image *is* the tool result, so it reaches the transcript **and** renders in the terminal — the only path in this package that puts a picture on screen |
+| `game_window` | `{}` | Returns bound window: exe, title, bounds, display, whether stale | Read-only, metadata only, no pixels |
 
 Both are declared with `annotations: { readOnlyHint: true, openWorldHint: false }` so a permission extension never blocks them (`extensions.md`, tool exposure).
 
-Both are registered `direct` — they are the point of the package and should be visible to the model on every turn. `game_window` is cheap; `game_frame` is **not** model-gated by default, so the tool description must state that each call attaches another image (§6.3.3).
+Both are registered `direct` — they are the point of the package and should be
+visible to the model on every turn.
+
+> **The description is load-bearing.** Under A3 the model decides whether a turn
+> spends a capture, so `game_frame`'s description and `promptGuidelines` carry the
+> trigger list (*what just happened, where am I, what does this menu or stat
+> screen say, what changed since the last frame*) and the explicit non-trigger
+> list (*lore, builds, recipes, strategy, who a character is, or an earlier frame
+> already answers it*). A tool the model cannot date is a coin flip, and both
+> outcomes are worse than the per-message capture it replaced.
+
+A frame taken through the tool is recorded with `pi.appendEntry` carrying the
+`FrameRecord` plus `reason: "tool"`. The ledger rebuilds from those entries, so a
+tool-taken frame has to write one — a tool result is not a conversation message,
+and nothing else in the transcript describes the frame.
 
 #### 6.6.3 Status line
 
@@ -511,8 +601,13 @@ that is not true**, so there is no frame counter until there is a frame to count
 ```
 ○ Sidekick no window · /gs play
 ● Sidekick eldenring.exe · 1920×1440 · 14 frames
+● Sidekick eldenring.exe · 1920×1440 · 14 frames · every message
 ● Sidekick eldenring.exe · 1920×1440 · 14 frames · stale
 ```
+
+The `· every message` marker appears only when `/gs auto on` has put capture
+back on every message (§0 A3) — a mode the player set deliberately and will
+notice its absence when it stops being what they want.
 
 Styling is emitted only in TUI mode, decided by `ctx.mode === "tui"` rather than
 by `process.stdout.isTTY` — an extension shares pi's process, so the stdio check
@@ -554,10 +649,13 @@ pi's system prompt is built from sections. Gamer Sidekick appends one section, o
 ```
 [gamer-sidekick]
 The user is asking about the game bound to this session (<exe>, <title>).
-A screenshot of the current game state is attached to the most recent user message.
-Describe only what is visible in the frame. If the frame is unavailable, say so plainly
-instead of guessing. Be concise and actionable. Prefer concrete numbers, items, and
-positioning over general advice. Do not claim you can see anything not in the frame.
+No screenshot arrives with their message. You have no view of the game until you
+call `game_frame`. Call it whenever the answer depends on what is on screen right
+now; answer without it when the question is about the game rather than the screen.
+Describe only what is visible in a frame you actually took. If the frame is
+unavailable, say so plainly instead of guessing. Be concise and actionable.
+Prefer concrete numbers, items, and positioning over general advice. Do not claim
+you can see anything you did not look at.
 ```
 
 Added via the `before_agent_start` `systemPromptOptions` mutation (not by replacing the whole prompt). Removing the extension removes the section.
@@ -782,7 +880,8 @@ Option B from the original discussion: keep this package as the entire brain, an
 
 | ID | Scenario | Expected outcome |
 | --- | --- | --- |
-| **AC-GS-09** | Run a session with 20 captured frames; inspect every session JSONL file | **Zero** base64 image payloads on disk. Frame records contain metadata only |
+| ~~**AC-GS-09**~~ **SUPERSEDED by A2** | ~~Run a session with 20 captured frames; inspect every session JSONL file~~ | ~~Zero base64 on disk~~ — frames are ordinary entries now, so the guarantee is gone and the trade was deliberate |
+| **AC-GS-22** | Run a session with three questions, two about the game and one about the screen; inspect the session JSONL | **Zero** frames with `reason: "prompt"`. Every frame came from a `game_frame` tool result, and the two game-knowledge questions took none |
 | **AC-GS-10** | Search `%TEMP%`, `%APPDATA%`, and the package directory after a capture session | No new image files |
 | **AC-GS-11** | Grep the installed package for filesystem writes | Only the config/binding writes in §6.1; no image buffer is ever passed to a write call |
 
@@ -833,7 +932,7 @@ M2 is the milestone that matters. **If frames cannot be attached without hitting
 | **G-D2** | **No overlay window in v0.1.0** | Unreachable from inside a pi package: `registerShortcut` needs pi's terminal focused, and RPC mode makes `onTerminalInput()` a no-op. The window is possible only from an external host (§11.1) |
 | **G-D3** | Capture target is a **bound window**, not the foreground window | The foreground window at capture time is the terminal the user is typing in. Foreground capture is structurally wrong for this product |
 | ~~**G-D4**~~ **SUPERSEDED by A2** | Inject frames at the **`context`** event, not by rewriting the user message | `before_agent_start`'s message result is persisted to the session file; that would write ~330 KB of base64 per turn. The player wants the frame *in* the conversation, so the old rationale no longer applies. Frames are now returned as a custom message from `before_agent_start`, which costs disk and buys scrollback, `/resume` and persistence for free |
-| **G-D5** | Frame budget: 1 live + 3 pinned | Bounded cost and context coherence; more than one frame per turn answers almost no real question |
+| ~~**G-D5**~~ **SUPERSEDED by A3** | ~~Frame budget: 1 live + 3 pinned~~ | A budget only made sense when capture was unconditional. On demand the model is already the budget, and `/gs auto on` is the escape hatch |
 | **G-D6** | No model list, pricing table, or API-key handling | pi owns all three. Duplicating them guarantees drift |
 | **G-D7** | Non-competitive games only; advisory list, `warn` by default | Carried forward from the deprecated PRD; product policy, not architecture |
 | **G-D8** | Capture failure never fails the question | A gaming companion that silently drops your question is worse than one that answers without a frame |
@@ -862,7 +961,8 @@ Before development starts, confirm:
 - [ ] **G-D3 understood and accepted:** the capture target is a bound window, not the foreground window (§6.1.1). This is the difference between a working product and one that photographs a terminal.
 - [ ] **G-D2 accepted:** no overlay in v0.1.0. The user alt-tabs to a terminal. (§4.2, §11 R-1)
 - [x] ~~**G-D4 accepted: frames are injected at the `context` event so image bytes never reach disk. Enforced by AC-GS-09.~~ **SUPERSEDED by A2** — the player traded the disk guarantee for frames in the conversation.
-- [ ] §6.3.2's `context`-injection mechanism is understood to be load-bearing. If it does not work, M2 stops and the package is re-scoped.
+- [ ] ~~§6.3.2's `context`-injection mechanism is understood to be load-bearing. If it does not work, M2 stops and the package is re-scoped.~~ **WITHDRAWN (A2/A3)** — replaced by the ledger (§ `extensions/ledger.ts`) and by `game_frame`.
+- [ ] **A3 accepted:** capture is on demand, the model decides, and `/gs auto on` is the escape hatch. The open risk is **model compliance** — a small free model that never calls `game_frame` will answer every question blind. Measured, not assumed: see §0 A3.
 - [ ] Open decisions **G-O1 … G-O8** are answered.
 - [ ] The competitive-title policy (§9) is accepted as a product constraint.
 - [ ] The owner accepts that this package **cannot** become an overlay without the §11.1 upgrade (an external Tauri host driving pi over RPC).

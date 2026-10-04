@@ -63,10 +63,10 @@ window" approach would photograph a text editor. Sidekick therefore binds a
 specific window handle and re-validates it before every capture. If you switch
 games, run `/gs play` again.
 
-Frames are attached at `before_agent_start` and returned as an ordinary
-conversation message, so pi stores them in the session file and hands them back
-to the model on later turns and after a `/resume`. A separate metadata entry
-records the size, token cost and hash for `/gs frames` and `/gs status`, without
+Frames are not taken on every message. The model calls `game_frame` when the
+answer depends on what is on screen — a question about lore, a build or a boss
+costs nothing at all. Whichever way a frame arrives, a separate metadata entry
+records its size, token cost and hash for `/gs frames` and `/gs status`, without
 duplicating the image.
 
 ## Commands
@@ -76,7 +76,8 @@ duplicating the image.
 | `/gs setup` | Check that window enumeration and capture both work; report each. |
 | `/gs play` | Pick and bind a window. |
 | `/gs unbind` | Stop capturing. |
-| `/gs status` | What is bound, whether it is still alive, frame counters. |
+| `/gs auto on\|off` | Capture every message instead of only when the model asks. Default `off`. |
+| `/gs status` | What is bound, whether it is still alive, capture mode, frame counters. |
 | `/gs frames` | List frames in this conversation with ids, size and token cost. |
 | `/gs display [n]` | Override which display the window is looked for on. |
 | `/gs help` | This list. |
@@ -90,6 +91,7 @@ without focusing on it:
 ○ Sidekick no window · /gs play              nothing bound yet
 ● Sidekick sora_2nd.exe · 2560×1440          bound, nothing captured yet
 ● Sidekick sora_2nd.exe · 2560×1440 · 14 frames
+● Sidekick sora_2nd.exe · 2560×1440 · 14 frames · every message
 ● Sidekick sora_2nd.exe · 2560×1440 · 14 frames · stale
 ○ Sidekick starting…                         probe still running
 × Sidekick <reason>                          capture is not available
@@ -99,25 +101,34 @@ The glyph is the part worth parsing — green `●` bound, yellow `○` nothing 
 or starting, red `×` broken. Colour appears in TUI mode only, and `NO_COLOR`
 turns it off everywhere.
 
-## Frames are part of the conversation
+## Nothing is photographed until it is needed
 
-Each time you press `Enter`, the frame lands in the transcript as an ordinary
-message with a `[FRAME #001 · …]` caption and the image beside it. That means:
+Pressing `Enter` does not capture anything. The companion sees nothing at all
+until it calls `game_frame`, and it is told to call it when the answer depends on
+the screen — what just happened, where you are, what a menu or status screen
+says, what changed since the last look — and to answer without it when the
+question is about the game rather than the screen.
 
-- the model can refer to it on every following turn without anything
-  re-sending it;
-- it survives `/resume` — pi loads it straight back into the conversation;
-- `/gs frames` and the status line count it, including frames captured in an
+The reason is simple arithmetic. A frame is ~150 KB of base64 in the session
+file and ~595 image tokens of context. Three questions about lore in the same
+room used to cost three identical screenshots of that room. Now they cost
+nothing, and only the question that needed the screen spends a capture.
+
+What you get in return:
+
+- the picture is actually **visible**. pi renders only the text blocks of a
+  custom message, so the old automatic path reached the model and left you a
+  caption. A tool result is rendered — asking for a frame is the only way in this
+  package to see the game;
+- every frame stays in the conversation, so it survives `/resume` and the model
+  can refer back to it by number;
+- `/gs frames` and the status line count them, including frames taken in an
   earlier process.
 
-What it does *not* mean: pi renders only the text blocks of a custom message,
-so you see the caption in your scrollback, not the picture. Asking the model to
-look again (`game_frame`, which it will do if you ask) is the way to actually
-see one — a tool result is the only thing that renders an image.
-
-The cost is disk. A frame is ~150 KB of base64 in the session file, and ~595
-image tokens of context, for every message you send while a window is bound.
-Long conversations accumulate; `/compact` is the release valve.
+The cost is a round trip on the turns that do need a frame, and the model's
+willingness to reach for the tool. If you would rather not depend on that,
+`/gs auto on` puts a frame on every message the way it worked before, and the
+status line says `· every message` so you know which mode you are in.
 
 ## Looking things up
 
@@ -148,8 +159,9 @@ binding with it. Start a different conversation and it starts unbound; run
 
 ## Model tools
 
-`game_frame` — capture now and return the image. `game_window` — metadata about
-the bound window, no pixels. Both stay dormant until a window is bound.
+`game_frame` — take a screenshot of the bound window now and return the image.
+`game_window` — metadata about the bound window, no pixels. Both stay dormant
+until a window is bound.
 
 ## Security
 

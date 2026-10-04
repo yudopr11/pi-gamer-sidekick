@@ -1,30 +1,39 @@
 /**
  * Frame attachment — the load-bearing mechanism of this package.
  *
- * PRD §6.3.2, amended by A2.
+ * PRD §6.3.2, amended by A2 and then reversed by A3.
  *
- * The captured frame is returned from `before_agent_start` as a custom message
- * carrying the caption and the image. pi appends it to the conversation right
- * after the player's question, which is all it takes to make the frame an
- * ordinary part of the transcript:
+ * **A3: the model asks for frames, the package does not volunteer them.**
+ * A2 captured on every message and appended the frame to the conversation.
+ * That made a question about lore, a boss or a build cost ~150 KB of session
+ * file and ~595 image tokens for a picture of an unchanging room. So the
+ * capture now happens inside `game_frame`, and this hook only does two things:
+ * re-read the binding and the ledger before the turn, and — when the player
+ * has asked for it with `/gs auto on` — capture the old way.
  *
- *   - it reaches the model as a user message with an image block
- *     (`convertToLlm` maps `role:"custom"` onto `role:"user"`, content intact);
- *   - it is persisted, so `/resume` brings the frame back with the conversation;
- *   - it stays in context on later turns without anything re-attaching it.
+ * The reasons it is safe to invert rather than guess at:
  *
- * The one thing it does not do is *render* the image in the terminal: pi's
- * CustomMessageComponent shows the text blocks and drops the rest, for a live
- * turn and a resumed one alike. The picture reaches the model; the player sees
- * the caption. That is why there is no pinning — a pin existed to force a frame
- * into context, and a frame that is simply in the conversation does that — and
- * also why `game_frame` is still registered: it is the only path that returns
- * an image as a tool result, and tool results do render.
+ *   - **The model is the only one who knows.** Whether a question depends on
+ *     the screen is a property of the question. A keyword match in here would
+ *     be a guess with no way to recover from a false negative: the model has no
+ *     idea it is flying blind.
+ *   - **It is cheaper in the common case.** A turn that does not need a frame
+ *     now costs nothing at all — no capture, no tokens, no disk, no ~600 ms.
+ *   - **It fixes the rendering gap.** pi's CustomMessageComponent shows the
+ *     text blocks of a custom message and drops the image, so a frame attached
+ *     this way reached the model but never the player. A tool result *is*
+ *     rendered, so asking for a frame is the first path where you see the
+ *     picture in the terminal.
  *
- * The cost is disk: a custom message is a session entry, so each captured
- * frame writes its base64 JPEG into the session JSONL. A 1280px frame is
- * ~150 KB. That is the price of a frame you can scroll back to, and it is the
- * player's call to make.
+ * The cost is a round trip on the turns that do need one, and the model's
+ * willingness to reach for the tool. `/gs auto on` is the escape hatch for
+ * either objection; `/gs status` and the footer show which mode is in force.
+ *
+ * **Why the ledger re-read stays on this hook.** A conversation can gain a
+ * binding at any time, and pi rebuilds the extension — and this state — whenever
+ * a conversation is replaced. This hook runs before every turn, so it is the
+ * one place that can put a resumed conversation back together before the model
+ * decides whether it needs to look at anything.
  */
 
 import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
@@ -47,6 +56,9 @@ export interface FrameMessage {
 
 /**
  * Build the conversation message that carries a frame.
+ *
+ * Only used when `/gs auto on` has put capture back on every message; on the
+ * default path the frame rides home as a `game_frame` tool result instead.
  *
  * Caption first, then the image: providers read content in order, so the model
  * is told what it is looking at before it looks at it.
@@ -99,6 +111,15 @@ export function registerAttachment(
 				state.promptHintShown = true;
 				ctx.ui.notify("Gamer Sidekick: no game bound — run /gs play to start capturing frames.", "info");
 			}
+			state.pendingFrame = null;
+			return;
+		}
+
+		// Default path: the model calls `game_frame` if it needs to see. Nothing
+		// is captured, nothing is attached, and the turn is indistinguishable
+		// from one with no game bound at all — which is the cost the player was
+		// asking to avoid.
+		if (!state.alwaysCapture) {
 			state.pendingFrame = null;
 			return;
 		}
@@ -183,6 +204,9 @@ export function statusText(state: SidekickState): string | undefined {
 	if (state.framesCaptured > 0) {
 		parts.push(`${dim("·")} ${state.framesCaptured} frame${state.framesCaptured === 1 ? "" : "s"}`);
 	}
+	// Always-on is a mode the player set deliberately and will notice its
+	// absence when it stops being what they want, so say which one is in force.
+	if (state.alwaysCapture) parts.push(`${dim("·")} every message`);
 	if (state.bindingStale) parts.push(`${dim("·")} ${yellow("stale")}`);
 	return parts.join(" ");
 }
