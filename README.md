@@ -73,12 +73,12 @@ pi's footer carries one line for this package, colour-coded so it can be read
 without focusing on it:
 
 ```
-○ sidekick no window · /gs play              nothing bound yet
-● sidekick sora_2nd.exe · 2560×1440          bound, nothing captured yet
-● sidekick sora_2nd.exe · 2560×1440 · 14 frames
-● sidekick sora_2nd.exe · 2560×1440 · 14 frames · stale
-○ sidekick starting…                         probe still running
-× sidekick <reason>                          capture is not available
+○ Sidekick no window · /gs play              nothing bound yet
+● Sidekick sora_2nd.exe · 2560×1440          bound, nothing captured yet
+● Sidekick sora_2nd.exe · 2560×1440 · 14 frames
+● Sidekick sora_2nd.exe · 2560×1440 · 14 frames · stale
+○ Sidekick starting…                         probe still running
+× Sidekick <reason>                          capture is not available
 ```
 
 The glyph is the part worth parsing — green `●` bound, yellow `○` nothing bound

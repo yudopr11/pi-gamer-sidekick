@@ -159,25 +159,26 @@ export function describeFailure(failure: { kind: string; reason?: string }): str
  * 3. **Say nothing that is not true.** No frame counter until there is a frame
  *    to count — an empty `0 frames` is noise that costs eight characters.
  *
- * The wordmark is lowercase. Caps are the terminal's shouting convention, meant
- * for something that needs to cut through; this line is dimmed and sits beside
- * other packages' status, so it should read as a name rather than an alert.
+ * The wordmark is set as `Sidekick`. Caps are the terminal's shouting
+ * convention, meant for something that needs to cut through, and this line is
+ * dimmed and sits beside other packages' status — so it takes an initial cap as
+ * a proper noun and nothing more.
  *
  * Every space here is single, deliberately: that is what pi actually renders.
  */
 export function statusText(state: SidekickState): string | undefined {
 	if (!state.available) {
-		if (state.disabledReason) return `${red("×")} ${dim("sidekick")} ${red(state.disabledReason)}`;
-		return `${dim("○")} ${dim("sidekick")} starting…`;
+		if (state.disabledReason) return `${red("×")} ${dim("Sidekick")} ${red(state.disabledReason)}`;
+		return `${dim("○")} ${dim("Sidekick")} starting…`;
 	}
 	if (!state.binding) {
-		return `${yellow("○")} ${dim("sidekick")} no window ${dim("·")} ${underline("/gs play")}`;
+		return `${yellow("○")} ${dim("Sidekick")} no window ${dim("·")} ${underline("/gs play")}`;
 	}
 
 	const b = state.binding;
 	const size = formatSize({ width: b.bounds.width, height: b.bounds.height });
 	const parts = [
-		`${state.bindingStale ? yellow("●") : green("●")} ${dim("sidekick")} ${bold(b.identity.exe)} ${dim("·")} ${size}`,
+		`${state.bindingStale ? yellow("●") : green("●")} ${dim("Sidekick")} ${bold(b.identity.exe)} ${dim("·")} ${size}`,
 	];
 	if (state.framesCaptured > 0) {
 		parts.push(`${dim("·")} ${state.framesCaptured} frame${state.framesCaptured === 1 ? "" : "s"}`);

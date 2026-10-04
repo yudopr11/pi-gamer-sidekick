@@ -95,7 +95,7 @@ describe("status line — words", () => {
 		assert.notEqual(starting, broken);
 	});
 
-	it("uses a lowercase wordmark, not a shouting one", () => {
+	it("uses the wordmark as a proper noun, not shouting", () => {
 		for (const state of [
 			stateWith(),
 			stateWith({ binding: BINDING }),
@@ -104,8 +104,9 @@ describe("status line — words", () => {
 			stateWith({ available: false, disabledReason: "boom" }),
 		]) {
 			const line = statusText(state) ?? "";
-			assert.match(line, /\bsidekick\b/);
+			assert.match(line, /\bSidekick\b/);
 			assert.doesNotMatch(line, /SIDEKICK/);
+			assert.doesNotMatch(line, /\bsidekick\b/);
 		}
 	});
 

@@ -502,9 +502,9 @@ padding renders differently from the one that was written; and it **says nothing
 that is not true**, so there is no frame counter until there is a frame to count.
 
 ```
-○ sidekick no window · /gs play
-● sidekick eldenring.exe · 1920×1440 · 14 frames
-● sidekick eldenring.exe · 1920×1440 · 14 frames · stale
+○ Sidekick no window · /gs play
+● Sidekick eldenring.exe · 1920×1440 · 14 frames
+● Sidekick eldenring.exe · 1920×1440 · 14 frames · stale
 ```
 
 Styling is emitted only in TUI mode, decided by `ctx.mode === "tui"` rather than
@@ -714,12 +714,12 @@ Status strings below are what pi draws in the footer, colour stripped.
 
 | # | Condition | User sees | Model sees | Data at risk |
 | --- | --- | --- | --- | --- |
-| E1 | No window bound | `○ sidekick no window · /gs play` | Normal text answer | none |
+| E1 | No window bound | `○ Sidekick no window · /gs play` | Normal text answer | none |
 | E2 | Bound window closed | glyph turns yellow, `/gs status` says the window is gone — run `/gs play` | "The game window was not available, so I have no current frame." | none |
 | E3 | Window minimized | glyph turns yellow, `/gs status` says minimized | same as E2, reason stated | none |
 | E4 | Black frame | one notify: the capture failed; `/gs status` shows the reason (exclusive fullscreen is the usual cause) | "The frame capture failed; I cannot see the current state." | none |
-| E5 | Capture support probe fails | `× sidekick <reason>`; every `/gs` subcommand reports it | package inert | none |
-| E6 | Non-Windows platform | `× sidekick <reason>`; package inert | package inert | none |
+| E5 | Capture support probe fails | `× Sidekick <reason>`; every `/gs` subcommand reports it | package inert | none |
+| E6 | Non-Windows platform | `× Sidekick <reason>`; package inert | package inert | none |
 | E7 | Selected model rejects images | capture still attached; the provider is the one that would fail | text-only answer | cost saved |
 | E8 | ~~Pin limit reached~~ | **WITHDRAWN (A2)** — pinning is gone | — | — |
 | E9 | Compaction in progress | nothing; pi owns the compaction indicator | nothing special | none |
