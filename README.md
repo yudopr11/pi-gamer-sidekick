@@ -67,6 +67,24 @@ duplicating the image.
 | `/gs display [n]` | Override which display the window is looked for on. |
 | `/gs help` | This list. |
 
+## The status line
+
+pi's footer carries one line for this package, colour-coded so it can be read
+without focusing on it:
+
+```
+○ SIDEKICK no window · /gs play              nothing bound yet
+● SIDEKICK sora_2nd.exe · 2560×1440          bound, nothing captured yet
+● SIDEKICK sora_2nd.exe · 2560×1440 · 14 frames
+● SIDEKICK sora_2nd.exe · 2560×1440 · 14 frames · stale
+○ SIDEKICK starting…                         probe still running
+× SIDEKICK <reason>                          capture is not available
+```
+
+The glyph is the part worth parsing — green `●` bound, yellow `○` nothing bound
+or starting, red `×` broken. Colour appears in TUI mode only, and `NO_COLOR`
+turns it off everywhere.
+
 ## Frames are part of the conversation
 
 Each time you press `Enter`, the frame lands in the transcript as an ordinary

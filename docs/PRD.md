@@ -493,13 +493,31 @@ Both are registered `direct` — they are the point of the package and should be
 
 #### 6.6.3 Status line
 
-`ctx.ui.setStatus("gamer-sidekick", statusText)` renders in pi's footer:
+`ctx.ui.setStatus("gamer-sidekick", statusText)` renders in pi's footer. The line
+is read without focusing on it, so it follows three rules: a **glyph carries
+the state** (`●` bound, `○` unbound or starting, `×` broken) because it is the
+one thing that must survive truncation; **weight sets the hierarchy**, since
+pi's `sanitizeStatusText` collapses runs of spaces and a design leaning on
+padding renders differently from the one that was written; and it **says nothing
+that is not true**, so there is no frame counter until there is a frame to count.
 
 ```
-[SIDEKICK · eldenring.exe · 1920x1080 · 14 frames · ctx 68%]
+○ SIDEKICK no window · /gs play
+● SIDEKICK eldenring.exe · 1920×1440 · 14 frames
+● SIDEKICK eldenring.exe · 1920×1440 · 14 frames · stale
 ```
 
-Updated on `before_agent_start`, `session_start`, `/gs status`, and session switch. Cleared on unbind and on capture failure.
+Styling is emitted only in TUI mode, decided by `ctx.mode === "tui"` rather than
+by `process.stdout.isTTY` — an extension shares pi's process, so the stdio check
+gives the same answer in practice, but `ctx.mode` is a statement of intent
+instead of an inference. `NO_COLOR` still wins. pi-tui is ANSI-aware
+(`truncateToWidth` measures with `visibleWidth`), so escape codes cost no
+visible width and cannot be truncated in half. Colour lives in
+`extensions/style.ts`; chalk is pi's dependency and importing it from a package
+that does not declare it would break when pi restructures its `node_modules`.
+
+Updated on `before_agent_start`, `session_start`, `turn_end`, and every `/gs`
+subcommand. Cleared on unbind.
 
 > **Known limitation:** `setStatus` is documented as a **no-op in RPC mode**. Gamer Sidekick targets TUI mode (§6.8).
 
@@ -587,6 +605,7 @@ pi-gamer-sidekick/
 │   ├── commands.ts           # /gs command surface (§6.6.1)
 │   ├── tools.ts              # game_frame, game_window (§6.6.2)
 │   ├── prompt.ts             # system-prompt section (§6.7.2)
+│   ├── style.ts              # ANSI styling for the footer, TUI-only (§6.6.3)
 │   └── win/                  # C# P/Invoke compiled once to gs_win32.dll
 ├── types/
 │   └── screenshot-desktop.d.ts
@@ -691,18 +710,20 @@ Rationale: real-time advice during competitive play crosses from "assistant" int
 
 ## 10. Error Matrix
 
+Status strings below are what pi draws in the footer, colour stripped.
+
 | # | Condition | User sees | Model sees | Data at risk |
 | --- | --- | --- | --- | --- |
-| E1 | No game bound | `[SIDEKICK · no game bound · /gs play]` in status | Normal text answer | none |
-| E2 | Bound window closed | `[SIDEKICK · eldenring.exe is gone — /gs play]` | "The game window was not available, so I have no current frame." | none |
-| E3 | Window minimized | `[SIDEKICK · eldenring.exe minimized]` | same as E2, reason stated | none |
-| E4 | Black frame | `[SIDEKICK · capture returned black — exclusive fullscreen?]`, retried once | "The frame capture failed; I cannot see the current state." | none |
-| E5 | Native module failed to load | One notify at startup; `/gs *` reports unavailable | package inert | none |
-| E6 | Non-Windows platform | `[SIDEKICK · unavailable on this platform]` | package inert | none |
-| E7 | Selected model rejects images | Capture skipped; `[SIDEKICK · <model> has no image input — /gs models]` | text-only answer | cost saved |
-| E8 | Pin limit reached (3) | `[SIDEKICK · pin #7 evicted (limit 3)]` | oldest pin silently absent | none |
-| E9 | Compaction in progress | `[SIDEKICK · compacting…]` then context % | nothing special | none |
-| E10 | Capture exceeds 3s budget | `[SIDEKICK · slow capture (2.8s)]`, frame still attached | frame attached | none |
+| E1 | No window bound | `○ SIDEKICK no window · /gs play` | Normal text answer | none |
+| E2 | Bound window closed | glyph turns yellow, `/gs status` says the window is gone — run `/gs play` | "The game window was not available, so I have no current frame." | none |
+| E3 | Window minimized | glyph turns yellow, `/gs status` says minimized | same as E2, reason stated | none |
+| E4 | Black frame | one notify: the capture failed; `/gs status` shows the reason (exclusive fullscreen is the usual cause) | "The frame capture failed; I cannot see the current state." | none |
+| E5 | Capture support probe fails | `× SIDEKICK <reason>`; every `/gs` subcommand reports it | package inert | none |
+| E6 | Non-Windows platform | `× SIDEKICK <reason>`; package inert | package inert | none |
+| E7 | Selected model rejects images | capture still attached; the provider is the one that would fail | text-only answer | cost saved |
+| E8 | ~~Pin limit reached~~ | **WITHDRAWN (A2)** — pinning is gone | — | — |
+| E9 | Compaction in progress | nothing; pi owns the compaction indicator | nothing special | none |
+| E10 | Capture exceeds the 3s budget | capture still attached; `/gs status` reports the timing | frame attached | none |
 
 **Invariant INV-4:** every one of E1–E10 degrades to *a working text-only pi session*. The package never blocks a prompt.
 

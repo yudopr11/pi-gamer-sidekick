@@ -30,6 +30,7 @@
 import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { captureFrame } from "./capture.ts";
+import { bold, dim, green, red, underline, yellow } from "./style.ts";
 import { restoreBinding } from "./binding.ts";
 import { captionFor } from "./frames.ts";
 import { FRAME_ENTRY, rehydrateLedger } from "./ledger.ts";
@@ -142,17 +143,41 @@ export function describeFailure(failure: { kind: string; reason?: string }): str
 	}
 }
 
-/** One-line status summary for the footer. PRD §6.6.3. */
+/**
+ * The footer status line. PRD §6.6.3.
+ *
+ * Designed to be read at a glance without focusing on it. Three rules:
+ *
+ * 1. **A glyph carries the state.** `●` bound and healthy, `○` nothing bound or
+ *    still starting, `×` broken. That is the one thing worth parsing, and it
+ *    survives being truncated.
+ * 2. **Weight, not spacing, sets the hierarchy.** pi's `sanitizeStatusText`
+ *    collapses runs of spaces, so double spaces do not survive — a design that
+ *    leans on them renders differently from the one that was written. The
+ *    wordmark and separators recede with `dim`; the bound executable is the
+ *    only bold thing on the line.
+ * 3. **Say nothing that is not true.** No frame counter until there is a frame
+ *    to count — an empty `0 frames` is noise that costs eight characters.
+ *
+ * Every space here is single, deliberately: that is what pi actually renders.
+ */
 export function statusText(state: SidekickState): string | undefined {
 	if (!state.available) {
-		// `disabledReason` is null while the probe is still running.
-		return state.disabledReason ? "[SIDEKICK · unavailable]" : "[SIDEKICK · starting…]";
+		if (state.disabledReason) return `${red("×")} ${dim("SIDEKICK")} ${red(state.disabledReason)}`;
+		return `${dim("○")} ${dim("SIDEKICK")} starting…`;
 	}
-	if (!state.binding) return "[SIDEKICK · no game bound · /gs play]";
+	if (!state.binding) {
+		return `${yellow("○")} ${dim("SIDEKICK")} no window ${dim("·")} ${underline("/gs play")}`;
+	}
 
 	const b = state.binding;
 	const size = formatSize({ width: b.bounds.width, height: b.bounds.height });
-	const stale = state.bindingStale ? " · stale" : "";
-	const frames = `${state.framesCaptured} frame${state.framesCaptured === 1 ? "" : "s"}`;
-	return `[SIDEKICK · ${b.identity.exe} · ${size} · ${frames}${stale}]`;
+	const parts = [
+		`${state.bindingStale ? yellow("●") : green("●")} ${dim("SIDEKICK")} ${bold(b.identity.exe)} ${dim("·")} ${size}`,
+	];
+	if (state.framesCaptured > 0) {
+		parts.push(`${dim("·")} ${state.framesCaptured} frame${state.framesCaptured === 1 ? "" : "s"}`);
+	}
+	if (state.bindingStale) parts.push(`${dim("·")} ${yellow("stale")}`);
+	return parts.join(" ");
 }

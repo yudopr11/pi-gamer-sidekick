@@ -139,6 +139,12 @@ export function createState(): SidekickState {
 }
 
 /** Compact human-readable size for the status line. */
+/**
+ * `2560×1440`, not `2560x1440`.
+ *
+ * The multiplication sign is one character wide in every monospace font pi is
+ * likely to be used with, and reads as a dimension rather than as an equation.
+ */
 export function formatSize(size: Size): string {
-	return `${size.width}x${size.height}`;
+	return `${size.width}×${size.height}`;
 }

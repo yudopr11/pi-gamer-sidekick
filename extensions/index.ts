@@ -25,6 +25,7 @@ import { rehydrateLedger } from "./ledger.ts";
 import { registerCommands } from "./commands.ts";
 import { withGamingSection } from "./prompt.ts";
 import { createState, type SidekickState } from "./state.ts";
+import { colorEnabled, setPaint } from "./style.ts";
 import { probeCaptureSupport } from "./windowinfo.ts";
 
 export default function gamerSidekick(pi: ExtensionAPI): void {
@@ -57,6 +58,12 @@ export default function gamerSidekick(pi: ExtensionAPI): void {
 	// --- session lifecycle ---------------------------------------------------
 	pi.on("session_start", async (_event, ctx) => {
 		await state.ready;
+
+		// Colour the status line only where a terminal will draw it. `ctx.mode`
+		// is authoritative — `process.stdout.isTTY` is the same answer in
+		// practice, but it is an inference about stdio wiring rather than a
+		// statement of intent from pi.
+		setPaint(ctx.mode === "tui" && colorEnabled());
 
 		// No reset here: replacing a conversation re-runs this entry function and
 		// builds a fresh state anyway, so there is nothing carried over to clear.
