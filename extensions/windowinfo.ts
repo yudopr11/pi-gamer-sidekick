@@ -119,22 +119,85 @@ export async function queryWindow(hwnd: number): Promise<WindowInfo | null> {
 }
 
 /**
- * Photograph one window's own content as PNG bytes.
+ * A finished frame: JPEG bytes plus the numbers the rest of the pipeline needs.
  *
- * The alternative — grab the whole display and crop — cannot see past anything
- * on top, which for this package is always the terminal holding the
- * conversation. Returns null when the window declines to render (some D3D
- * titles do), so callers can fall back to the desktop grab rather than
- * failing the turn.
+ * The shim does the scaling and the encoding, so nothing has to decode the
+ * image again to find out how big it is or whether it is black.
  */
-export async function captureWindow(hwnd: number): Promise<Buffer | null> {
-	const out = await runScript("capture-window.ps1", [String(hwnd)], 10000);
+export interface Shot {
+	/** Encoded JPEG. */
+	jpeg: Buffer;
+	width: number;
+	height: number;
+	/** Window or region size before the downscale. */
+	sourceWidth: number;
+	sourceHeight: number;
+	/** Mean red channel, 0..255. A GDI grab under exclusive fullscreen is 0. */
+	redMean: number;
+}
+
+interface RawShot {
+	jpeg: string;
+	width: number;
+	height: number;
+	sourceWidth: number;
+	sourceHeight: number;
+	redMean: number;
+}
+
+function parseShot(out: string | null): Shot | null {
 	if (out === null || out === "null") return null;
 	try {
-		return Buffer.from(out.trim(), "base64");
+		const raw = JSON.parse(out) as RawShot;
+		if (typeof raw.jpeg !== "string" || raw.jpeg.length === 0) return null;
+		return {
+			jpeg: Buffer.from(raw.jpeg, "base64"),
+			width: raw.width,
+			height: raw.height,
+			sourceWidth: raw.sourceWidth,
+			sourceHeight: raw.sourceHeight,
+			redMean: raw.redMean,
+		};
 	} catch {
 		return null;
 	}
+}
+
+/**
+ * One finished frame of the bound window, ignoring what is on top of it.
+ *
+ * The alternative — grab the whole display and crop — cannot see past anything
+ * covering the window, which for this package is always the terminal holding
+ * the conversation. PrintWindow asks the window to draw itself instead.
+ *
+ * Returns null when the window declines to render (some D3D titles do), so
+ * callers can fall back to the region grab rather than failing the turn.
+ */
+export async function captureWindowJpeg(hwnd: number, maxEdge: number, quality: number): Promise<Shot | null> {
+	const out = await runScript("capture-jpeg.ps1", [String(hwnd), String(maxEdge), String(quality)], 20000);
+	return parseShot(out);
+}
+
+/**
+ * One finished frame of a display region, including anything covering it.
+ *
+ * The fallback for a window that will not draw itself. `rect` is
+ * display-relative; the caller subtracts the display origin before calling.
+ * The occluders are not detected here — that is a second process — so the
+ * caller asks separately and has to say so in the caption.
+ */
+export async function grabRegion(
+	displayIndex: number,
+	rect: { left: number; top: number; width: number; height: number },
+	maxEdge: number,
+	quality: number,
+): Promise<Shot | null> {
+	const out = await runScript(
+		"grab-region.ps1",
+		[String(displayIndex), String(rect.left), String(rect.top), String(rect.width), String(rect.height), String(maxEdge), String(quality)],
+		20000,
+	);
+	return parseShot(out);
 }
 
 /** Titles of windows covering `hwnd`, sampled on a 2x2 grid. Empty = clear. */
@@ -152,7 +215,7 @@ export async function probeOccluders(hwnd: number): Promise<string[]> {
 /**
  * The display a window sits on, or null when its centre is off-screen.
  *
- * Positional: `screenshot-desktop` indexes displays, so a window spanning two
+ * Positional: the region-grab path indexes displays, so a window spanning two
  * monitors must resolve to the one holding its centre or the crop is wrong.
  * Display geometry is resolved once at bind time and cached on the binding, so
  * this runs at bind time and again only if a window migrates at runtime.
@@ -170,20 +233,20 @@ export function displayFor<T extends { index: number; x: number; y: number; widt
 }
 
 /**
- * Every display's pixel bounds, indexed for `screenshot-desktop`.
+ * Every display's pixel bounds, indexed for the region grab.
  *
- * The shim returns .NET `DeviceName`s (`\\.\DISPLAY1`); screenshot-desktop
- * indexes displays positionally and only exposes a name for `listDisplays()`.
- * Matching by name is what makes `--screen 1` mean the monitor next to the
- * primary one rather than "whatever happens to be second".
+ * The shim emits the index itself, because GrabRegion reads `Screen.AllScreens`
+ * by the same ordinal. That is what makes display 1 mean the monitor next to
+ * the primary one rather than "whatever the name matching guessed" — there is
+ * no name matching, so there is nothing to be ambiguous about.
  *
- * Returns null if PowerShell is unavailable or the mapping is ambiguous.
+ * Returns null if PowerShell is unavailable.
  */
 export async function resolveDisplays(): Promise<{ displays: DisplayInfo[]; warning?: string } | null> {
 	const out = await runScript("screens.ps1");
 	if (out === null) return null;
 
-	let screens: { name: string; x: number; y: number; w: number; h: number; primary: boolean }[];
+	let screens: { i: number; x: number; y: number; w: number; h: number }[];
 	try {
 		screens = parseRows(out);
 	} catch {
@@ -191,39 +254,15 @@ export async function resolveDisplays(): Promise<{ displays: DisplayInfo[]; warn
 	}
 	if (screens.length === 0) return null;
 
-	let names: string[];
-	try {
-		const mod = (await import("screenshot-desktop")) as unknown as {
-			default?: { listDisplays(): Promise<{ id: number; name: string }[]> };
-			listDisplays?(): Promise<{ id: number; name: string }[]>;
-		};
-		const lister = mod.default?.listDisplays ?? mod.listDisplays?.bind(mod);
-		if (!lister) return null;
-		names = (await lister())?.map((d) => String(d.name ?? "")) ?? [];
-	} catch {
-		return null;
-	}
+	const displays: DisplayInfo[] = screens.map((s, fallback) => ({
+		index: Number.isInteger(s.i) ? s.i : fallback,
+		x: Number(s.x),
+		y: Number(s.y),
+		width: Number(s.w),
+		height: Number(s.h),
+	}));
 
-	let ambiguous = false;
-	const displays: DisplayInfo[] = screens.map((s, fallback) => {
-		const match = names.findIndex((n) => n.toLowerCase() === String(s.name).toLowerCase());
-		if (names.length > 0 && match < 0) ambiguous = true;
-		return {
-			index: match >= 0 ? match : fallback,
-			x: Number(s.x),
-			y: Number(s.y),
-			width: Number(s.w),
-			height: Number(s.h),
-		};
-	});
-
-	return {
-		displays,
-		warning:
-			ambiguous && names.length > 0
-				? "display names did not match; using positional order — use /gs display <n> if the crop is off"
-				: undefined,
-	};
+	return { displays };
 }
 
 /** Can we actually see any windows? Used by `/gs setup`. */

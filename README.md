@@ -14,8 +14,10 @@ pi install git:github.com/yudopr11/pi-gamer-sidekick
 ```
 
 pi clones the repo, runs `npm install` for it and registers it in
-`~/.pi/agent/settings.json`. **This is the only installation you need** — it
-pulls `sharp` and `screenshot-desktop` itself, and gets updates with `pi update`.
+`~/.pi/agent/settings.json`. **This is the only installation you need.** The
+package has no runtime dependencies, so that install costs about 260 KB — the
+whole extension, prompt and skill — plus a 13 KB DLL it compiles on first run.
+Updates come with `pi update`.
 
 Verify, update, remove:
 
@@ -32,7 +34,7 @@ straight from the working tree, so edits take effect on the next start.
 
 ```bash
 cd path/to/pi-gamer-sidekick
-npm install                # sharp + screenshot-desktop
+npm install                # dev only: typescript and pi's SDK, for the tests
 pi install C:\path\to\pi-gamer-sidekick
 pi -e C:\path\to\pi-gamer-sidekick    # or: try it for one run only
 ```
@@ -178,10 +180,31 @@ delete or compact. (`scratch/probe-capture.ts` is a development probe and
 writes a JPEG to `%TEMP%` so you can eyeball the pipeline; it is not part of
 the package and never runs unless you type its command.)
 
-**Dependencies.** Two: `sharp` (resize/encode/stats) and `screenshot-desktop`
-(full-display grab, used only as a fallback when a window cannot render
-itself). Both are audited and both were checked clean at the version pinned
-here. pi's own packages are `peerDependencies` and are never bundled, so the
+**Dependencies.** None at runtime, and that is a deliberate decision rather
+than an accident.
+
+The obvious way to build this is `sharp` for scaling and encoding plus
+`screenshot-desktop` for the fallback grab. That is what it did first. Then it
+was measured: `libvips-42.dll`, which `sharp` installs, is **19 MB — 86% of the
+whole package**. The other 164 KB was the code.
+
+But the package already compiles a C# shim to talk to Windows, and Windows can
+already do exactly the three things `sharp` was doing here: `Graphics.DrawImage`
+to scale, an `EncoderParameters.Quality` to encode, and `LockBits` to compute the
+mean red channel that the black-frame check needs. Moving that work into the
+shim took the install from **22 MB to about 260 KB**.
+
+The reason it is worth doing is the boundary, not just the bytes. `PrintWindow`
+renders a 2560x1440 window; as a PNG that is 5.9 MB of base64 crossing out of
+PowerShell into JavaScript, only to be decoded, cropped, resized and re-encoded
+into the ~150 KB frame that actually gets sent. The finished frame is now the
+only thing that ever crosses.
+
+What was given up: `libvips` is a better JPEG encoder than GDI+. Sizes at the
+same quality number shift a little. Nothing this package used was lost — it only
+ever went PNG in, JPEG out, plus one statistics read.
+
+pi's own packages remain `peerDependencies` and are never bundled, so the
 package cannot end up shipping a second copy of your agent.
 
 ## Limits

@@ -1,16 +1,15 @@
 /**
  * End-to-end capture probe. NOT part of the package.
  *
- * Runs the real pipeline (enumerate -> bind -> query -> grab -> crop -> scale ->
- * encode) against whatever game window is actually on screen right now, and
- * dumps the resulting JPEG to %TEMP% so it can be eyeballed. Nothing here
- * writes inside the package directory — INV-2 still holds for the product.
+ * Runs the real pipeline (enumerate -> bind -> query -> grab -> scale -> encode)
+ * against whatever game window is actually on screen right now, and dumps the
+ * resulting JPEG to %TEMP% so it can be eyeballed. Nothing here writes inside
+ * the package directory — INV-2 still holds for the product.
  */
 
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import sharp from "sharp";
 
 import { captureFrame } from "../extensions/capture.ts";
 import { gameIdentity } from "../extensions/identity.ts";
@@ -81,10 +80,19 @@ const out = join(tmpdir(), `gs-probe-${Date.now()}.jpg`);
 writeFileSync(out, Buffer.from(f.data, "base64"));
 log(`  wrote ${out}`);
 
-// Independent verification of what actually landed on disk.
-const meta = await sharp(out).stats();
-log(`\n── decoded image stats ──`);
-log(`  channels ${meta.channels.length} mean ${meta.channels.map((c) => c.mean.toFixed(1)).join("/")}`);
-log(`  entropy ${meta.entropy.toFixed(3)} isOpaque ${meta.isOpaque}`);
+// Independent verification of what actually landed on disk, reading only the
+// header bytes. The point of this probe is that nothing decodes a frame in
+// JavaScript any more, so parsing the file back is the only honest check.
+const bytes = readFileSync(out);
+const soi = bytes[0] === 0xff && bytes[1] === 0xd8;
+let dims = "unreadable";
+for (let i = 2; i < bytes.length - 9; i++) {
+	if (bytes[i] === 0xff && bytes[i + 1] === 0xc0) {
+		dims = `${bytes.readUInt16BE(i + 7)}x${bytes.readUInt16BE(i + 5)}`;
+		break;
+	}
+}
+log(`\n── decoded image ──`);
+log(`  jpeg magic ${soi ? "ok" : "BAD"}  dimensions ${dims}  ${bytes.length} bytes`);
 
 log(`\ntotal ${Date.now() - t0}ms`);

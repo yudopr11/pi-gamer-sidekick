@@ -95,7 +95,8 @@ export default function gamerSidekick(pi: ExtensionAPI): void {
  * (and therefore any failure in it) is obvious at a glance.
  */
 function registerTools(pi: ExtensionAPI, state: SidekickState): void {
-	// Deferred import: tools.ts pulls in sharp and screenshot-desktop.
+	// Deferred import: tools.ts is the largest module and only matters once a
+	// window is bound, so a failure in it must not stop the command surface.
 	void import("./tools.ts")
 		.then((m) => m.registerTools(pi, state))
 		.catch(() => {

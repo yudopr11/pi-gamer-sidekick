@@ -316,20 +316,23 @@ Foreground targeting was specified here and has been removed. Re-resolving from 
   [2] DISPLAY   pick the display containing the window centre (cached
         |        from bind time; see 6.2.3)
         v
-  [3] GRAB      screenshot-desktop -> full-display JPEG buffer
-        |
+  [3] GRAB      PrintWindow(PW_RENDERFULLCONTENT) into a 32bpp
+        |        bitmap — the window draws itself, so nothing on
+        |        top of it is recorded
         v
-  [4] CROP      sharp .extract({left, top, width, height})
-        |        using window bounds in display-local coordinates
+  [4] SCALE     GDI+ DrawImage, high-quality bicubic, long edge
+        |        -> 1280 px  (never upscale; a 720p game stays 720p)
         v
-  [5] SCALE     .resize({ width: 1280, withoutEnlargement: true })
-        |        (never upscale; a 720p game stays 720p)
+  [5] ENCODE    JPEG quality 80  ->  base64, plus the mean red
+        |        channel read back from the same bitmap
         v
-  [6] ENCODE    .jpeg({ quality: 80 })  ->  Buffer
-        |
-        v
-  [7] ATTACH    ImageContent { type:"image", data: base64, mimeType:"image/jpeg" }
+  [6] ATTACH    ImageContent { type:"image", data: base64, mimeType:"image/jpeg" }
 ```
+
+Steps 3 to 5 are one PowerShell invocation returning one finished frame. They
+were three JavaScript calls on an intermediate PNG until the size of that PNG
+was measured: a 2560x1440 window renders to 5.9 MB of base64, which is 40x the
+~150 KB frame it existed to produce. §11 R-9.
 
 #### 6.2.2 Parameters
 
@@ -342,11 +345,15 @@ Foreground targeting was specified here and has been removed. Re-resolving from 
 
 #### 6.2.3 Multi-monitor
 
-`screenshot-desktop.listDisplays()` returns `{id, name}` **without bounds**, so it cannot by itself tell which display a window is on. Resolution:
+The shim reports `[System.Windows.Forms.Screen]::AllScreens` with **each screen's
+own index**, and the region grab reads `Screen.AllScreens` by that same ordinal.
+Publishing the index rather than matching on device name is what makes display 1
+mean the monitor next to the primary one: there is no name matching, so there is
+nothing to be ambiguous about. Resolution:
 
-1. At bind time, enumerate display bounds once (`[System.Windows.Forms.Screen]::AllScreens` through PowerShell, one invocation, result cached in memory and in the binding entry).
-2. Store the matching `screen` index for `screenshot({screen})` alongside the window bounds.
-3. If a window migrates to another display at runtime, the cached index is wrong. Detection: the cropped region falls outside the display's real bounds → re-resolve once, then continue. Cap re-resolutions at one per capture to avoid a loop.
+1. At bind time, enumerate display bounds once through the shim (one invocation, result cached in memory and in the binding entry).
+2. Store the screen index alongside the window bounds.
+3. If a window migrates to another display at runtime, the cached index is wrong. Detection: the window rectangle falls outside the display's bounds → re-resolve once, then continue. Cap re-resolutions at one per capture to avoid a loop.
 4. Manual override: `/gs display <n>`.
 
 #### 6.2.4 Failure handling
@@ -355,9 +362,9 @@ Foreground targeting was specified here and has been removed. Re-resolving from 
 | --- | --- | --- |
 | Window closed | HWND absent from `openWindows()` | Mark binding stale, notify once, send the question **without** an image, tell the model the frame was unavailable |
 | Window minimized | `bounds.width === 0 \|\| bounds.height === 0` | Same as above; message names the reason |
-| Capture returns black frame | Mean luminance of the crop below threshold | Retry once; if still black, warn (`capture returned a black frame — the game may be using exclusive fullscreen`) and attach nothing |
-| Native module missing | `import()` throws at load | §6.1.4 clean disable |
-| Crop fails (window partially off-screen) | `sharp.extract` throws | Clamp the rect to display bounds and retry once |
+| Capture returns black frame | Mean red channel below 2/255, read in the shim | Warn that the game may be using exclusive fullscreen and attach nothing |
+| Window will not render | `CaptureJpeg` returns null | Fall back to a region grab of the window's rectangle, record which windows were covering it, and say so in the caption |
+| Shim missing or uncompilable | `Add-Type` throws at load | §6.1.4 clean disable |
 
 **Design rule:** a capture failure **never fails the user's question**. The prompt is always delivered; only the image is omitted, and the omission is stated explicitly to the model so it does not hallucinate having seen a frame.
 
@@ -607,8 +614,6 @@ pi-gamer-sidekick/
 │   ├── prompt.ts             # system-prompt section (§6.7.2)
 │   ├── style.ts              # ANSI styling for the footer, TUI-only (§6.6.3)
 │   └── win/                  # C# P/Invoke compiled once to gs_win32.dll
-├── types/
-│   └── screenshot-desktop.d.ts
 ├── skills/
 │   └── gaming-companion/
 │       └── SKILL.md          # optional: deeper domain guidance the model
@@ -636,10 +641,13 @@ that need a running game), `test/`, `docs/`, and the compiled `gs_win32.dll` /
     "skills": ["./skills"],
     "prompts": ["./prompts/*.md"]
   },
-  "dependencies": {
-    "active-win": "^9.0.0",
-    "screenshot-desktop": "^1.15.6",
-    "sharp": "^0.33.0"
+  "dependencies": {},
+  "peerDependencies": {
+    "@earendil-works/pi-agent-core": "*",
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
+    "typebox": "*"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",
@@ -734,13 +742,13 @@ Status strings below are what pi draws in the footer, colour stripped.
 | ID | Risk | Severity | Mitigation / fallback |
 | --- | --- | --- | --- |
 | **R-1** | **No overlay.** The user must alt-tab to a terminal to ask a question. This is a materially worse experience than a floating overlay and is the main thing users will notice is missing. | **High** | Accepted for v0.1.0. The whole point of shipping the package first is to learn whether the *conversation quality* justifies an overlay before building one. If it does, §11.1 describes the upgrade path |
-| **R-2** | `screenshot-desktop` uses a GDI/DXGI screen copy. It may return **black frames under exclusive fullscreen** — the same class of failure the deprecated PRD analysed in §6.4 | Medium | E4 handles it honestly. Fallback ladder: (1) retry once, (2) instruct the user to use borderless fullscreen, (3) future: a WGC capture path |
-| **R-3** | `active-win@9.0.0` is a native module last published 2024-04-30; prebuilt binaries may not cover Node 22 on some Windows builds | Medium | `/gs setup` verifies it at install time. Fallback: `child_process` + PowerShell `Get-Process`/`GetWindowRect` P/Invoke, which needs no native module |
-| **R-4** | `sharp` is a large native dependency (~30 MB installed) | Low | Acceptable for prebuilt-binary installs. Fallback: send the full display uncropped and let the model cope (worse accuracy, higher token cost) |
+| **R-2** | The region-grab fallback uses a GDI screen copy. It may return **black frames under exclusive fullscreen** — the same class of failure the deprecated PRD analysed in §6.4 | Medium | E4 handles it honestly. The primary path (`PrintWindow`) does not use a screen copy at all. Fallback ladder: (1) the region grab, (2) instruct the user to use borderless fullscreen, (3) future: a WGC capture path |
+| **R-3** | ~~`active-win` may lack Node 22 prebuilds~~ **Realised, and the dependency is gone.** It imported cleanly and returned `undefined`, because npm 12 blocks install scripts and `node-pre-gyp install` never ran | Was medium | Replaced with `extensions/win/win32.cs`, compiled once to a 13 KB DLL. A dependency that fails *silently* in the one path that matters is worse than a P/Invoke shim |
 | **R-5** | HWNDs are recycled by Windows; a persisted binding can point at an unrelated window | Medium | §6.1.2 — bindings are validated against the live window list on every `session_start` and before every capture, and never trusted blindly |
 | **R-6** | Capturing on every prompt adds latency to the first token | Low | Budget 3s (§10 E10). Frames are pre-decoded and base64 strings are reused where the hash matches |
 | **R-7** | `ctx.ui.setStatus` is a no-op in RPC mode, so the package looks broken under an RPC host | Low | Detect `ctx.mode !== "tui"` at load and fall back to `ctx.ui.notify` for important state only. Documented as TUI-first |
 | **R-8** | Users expect an overlay, install this, and are disappointed | Medium | README leads with what it *is*. `/gs help` states it. The package name says "gamer", not "overlay" |
+| **R-9** | `libvips-42.dll`, installed by `sharp`, was **19 MB — 86% of the package**. The intermediate PNG also crossed the PowerShell boundary as 5.9 MB of base64 per capture, to produce a 150 KB frame | Was high | **Realised.** Scaling, encoding and the statistics read moved into `extensions/win/win32.cs`, which the package already compiles. `dependencies` is now empty: the install is ~260 KB and the only thing crossing the process boundary is the finished frame. GDI+ is a weaker JPEG encoder than libvips, so sizes at the same quality number shift; nothing this package used was lost |
 
 ### 11.1 Upgrade path if the overlay turns out to matter
 

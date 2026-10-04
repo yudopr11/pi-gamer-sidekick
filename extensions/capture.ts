@@ -1,7 +1,13 @@
 /**
  * The capture pipeline. PRD §6.2.
  *
- *   RESOLVE -> DISPLAY -> GRAB -> CROP -> SCALE -> ENCODE -> ATTACH
+ *   RESOLVE -> DISPLAY -> GRAB -> SCALE -> ENCODE -> ATTACH
+ *
+ * GRAB, SCALE and ENCODE are one PowerShell round trip. The shim renders the
+ * window, scales it, encodes it and reports its own statistics, so the only
+ * thing that crosses the process boundary is the finished frame. Doing it the
+ * other way round — PNG out, decode, crop, resize, encode — moved 5.9 MB of
+ * base64 per capture to save ~150 KB. (PRD §11 R-9)
  *
  * Two rules govern everything here:
  *
@@ -15,39 +21,25 @@ import { createHash } from "node:crypto";
 import {
 	CAPTURE_BUDGET_MS,
 	JPEG_QUALITY,
+	MAX_LONG_EDGE,
 	cropRectFor,
 	estimateImageTokens,
-	fitLongEdge,
 	type CropRect,
 } from "./geometry.ts";
-import { captureWindow, displayFor, probeOccluders, queryWindow, resolveDisplays } from "./windowinfo.ts";
+import { captureWindowJpeg, displayFor, grabRegion, probeOccluders, queryWindow, resolveDisplays, type Shot } from "./windowinfo.ts";
 import { recordFrame } from "./ledger.ts";
 import type { CaptureFailure, Frame, FrameRecord, SidekickState } from "./state.ts";
 
 export type CaptureOutcome = { ok: true; frame: Frame; elapsedMs: number } | { ok: false; failure: CaptureFailure; elapsedMs: number };
 
-interface ScreenshotDesktop {
-	(options: { screen?: number; format?: string }): Promise<Buffer>;
-}
-
 /**
- * Load `screenshot-desktop`, tolerating its CJS default-interop shape.
+ * Mean red channel below this reads as black.
  *
- * Under ESM the namespace object carries the callable as `.default`, but a
- * transitive CJS require can also land the properties directly on it, so both
- * shapes are accepted rather than assuming one.
+ * A GDI screen copy returns an all-zero buffer under exclusive fullscreen.
+ * Sending that to a vision model produces confident, wrong answers, so it is
+ * better to say "no frame" than to send one. (PRD §10 E4)
  */
-async function loadScreenshot(): Promise<ScreenshotDesktop | null> {
-	try {
-		const mod = (await import("screenshot-desktop")) as unknown as {
-			default?: ScreenshotDesktop;
-		} & Partial<ScreenshotDesktop>;
-		const fn = mod.default ?? (mod as ScreenshotDesktop);
-		return typeof fn === "function" ? fn : null;
-	} catch {
-		return null;
-	}
-}
+const BLACK_RED_MEAN = 2;
 
 /**
  * Capture the bound window's current frame.
@@ -91,106 +83,54 @@ export async function captureFrame(state: SidekickState): Promise<CaptureOutcome
 		if (!rect) return { ok: false, failure: { kind: "off-display" }, elapsedMs: Date.now() - started };
 	}
 
-	// --- GRAB ----------------------------------------------------------------
+	// --- GRAB / SCALE / ENCODE ----------------------------------------------
 	// Ask the window to draw itself before grabbing the display. Cropping a
 	// full-desktop shot records whatever is on top of the game, and for this
 	// package that is always the terminal holding the conversation — so half of
 	// every frame used to be pi. PrintWindow is the only way through an occluder.
-	const pipeline = (await import("sharp")).default;
-	let full: Buffer | null = await captureWindow(binding.hwnd);
+	let shot: Shot | null = await captureWindowJpeg(binding.hwnd, MAX_LONG_EDGE, JPEG_QUALITY);
 	/** Window titles sitting on top of the game, if we had to fall back. */
 	let coveredBy: string[] = [];
 
-	if (full && (await isBlack(full))) full = null;
+	if (shot && shot.redMean < BLACK_RED_MEAN) shot = null;
 
-	if (full) {
-		// Already exactly the window. Cropping to the display rect would cut off
-		// the very part the window capture just recovered.
-		const shot = await pipeline(full).metadata();
-		rect = {
-			left: 0,
-			top: 0,
-			width: shot.width ?? bounds.width,
-			height: shot.height ?? bounds.height,
-		};
-	} else {
-		const screenshot = await loadScreenshot();
-		if (!screenshot) {
-			return { ok: false, failure: { kind: "disabled", reason: "screenshot-desktop unavailable" }, elapsedMs: Date.now() - started };
-		}
-		try {
-			full = await screenshot({ screen: displayIndex });
-		} catch (error) {
+	if (!shot) {
+		// The window would not draw itself. Fall back to the region of the
+		// display it sits on — which records whatever is in the way, so ask what
+		// is in the way and let the caption say so.
+		const fallback = await grabRegion(displayIndex, rect, MAX_LONG_EDGE, JPEG_QUALITY);
+		if (!fallback) {
 			return {
 				ok: false,
-				failure: { kind: "disabled", reason: `screen capture failed: ${describe(error)}` },
+				failure: { kind: "disabled", reason: "the window would not render and the display grab failed" },
 				elapsedMs: Date.now() - started,
 			};
 		}
-		// The model cannot know something is missing, so the caption has to say so.
+		shot = fallback;
 		coveredBy = await probeOccluders(binding.hwnd);
 	}
 
-	// --- CROP / SCALE / ENCODE ----------------------------------------------
-	let encoded: Buffer;
-	try {
-		encoded = await pipeline(full)
-			.extract(rect)
-			.resize(fitLongEdge({ width: rect.width, height: rect.height }))
-			.jpeg({ quality: JPEG_QUALITY })
-			.toBuffer();
-	} catch {
-		// The window was partly off-screen when the rect was computed. Retry with
-		// the rect clamped to the grabbed buffer's own dimensions. (PRD §6.2.4)
-		try {
-			const meta = await pipeline(full).metadata();
-			const w = meta.width ?? displayBounds.width;
-			const h = meta.height ?? displayBounds.height;
-			const clamped: CropRect = {
-				left: Math.max(0, Math.min(rect.left, w - 1)),
-				top: Math.max(0, Math.min(rect.top, h - 1)),
-				width: Math.max(1, Math.min(rect.width, w - rect.left)),
-				height: Math.max(1, Math.min(rect.height, h - rect.top)),
-			};
-			encoded = await pipeline(full)
-				.extract(clamped)
-				.resize(fitLongEdge({ width: clamped.width, height: clamped.height }))
-				.jpeg({ quality: JPEG_QUALITY })
-				.toBuffer();
-		} catch (error) {
-			return {
-				ok: false,
-				failure: { kind: "disabled", reason: `crop failed: ${describe(error)}` },
-				elapsedMs: Date.now() - started,
-			};
-		}
-	}
-
 	// --- BLACK FRAME CHECK ---------------------------------------------------
-	// A GDI screen copy returns an all-black buffer under exclusive fullscreen.
-	// Sending that to a vision model produces confident, wrong answers, so it is
-	// better to say "no frame" than to send one. (PRD §10 E4)
-	if (await isBlack(encoded)) {
+	if (shot.redMean < BLACK_RED_MEAN) {
 		return { ok: false, failure: { kind: "black-frame" }, elapsedMs: Date.now() - started };
 	}
 
 	// --- ATTACH --------------------------------------------------------------
-	const meta = await pipeline(encoded).metadata();
-	const size = { width: meta.width ?? rect.width, height: meta.height ?? rect.height };
+	const size = { width: shot.width, height: shot.height };
 	const record: FrameRecord = {
 		id: state.nextFrameId++,
 		exe: binding.identity.exe,
 		width: size.width,
 		height: size.height,
-		bytes: encoded.byteLength,
-		hash: createHash("sha256").update(encoded).digest("hex").slice(0, 12),
+		bytes: shot.jpeg.byteLength,
+		hash: createHash("sha256").update(shot.jpeg).digest("hex").slice(0, 12),
 		timestamp: Date.now(),
 		imageTokens: estimateImageTokens(size),
-		// Non-empty only when the desktop-grab fallback was used with something
+		// Non-empty only when the display-grab fallback was used with something
 		// in the way. Travels with the metadata entry so the caption can warn.
 		coveredBy,
 	};
-	const frame: Frame = { record, data: encoded.toString("base64"), mimeType: "image/jpeg" };
+	const frame: Frame = { record, data: shot.jpeg.toString("base64"), mimeType: "image/jpeg" };
 
 	recordFrame(state, record);
 	state.frames.push(frame);
@@ -198,17 +138,6 @@ export async function captureFrame(state: SidekickState): Promise<CaptureOutcome
 	state.lastError = null;
 
 	return { ok: true, frame, elapsedMs: Date.now() - started };
-}
-
-/** Mean luminance of the red channel; below ~2/255 the frame is effectively black. */
-async function isBlack(jpeg: Buffer): Promise<boolean> {
-	try {
-		const pipeline = (await import("sharp")).default;
-		const stats = await pipeline(jpeg).stats();
-		return stats.channels[0]?.mean !== undefined && stats.channels[0].mean < 2;
-	} catch {
-		return false; // never fail a capture just because the check was inconclusive
-	}
 }
 
 /**
@@ -222,9 +151,4 @@ async function isBlack(jpeg: Buffer): Promise<boolean> {
 function pruneFrames(state: SidekickState): void {
 	const keep = 8;
 	while (state.frames.length > keep) state.frames.shift();
-}
-
-function describe(error: unknown): string {
-	if (error instanceof Error) return error.message;
-	return String(error);
 }

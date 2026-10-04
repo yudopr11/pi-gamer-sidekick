@@ -41,16 +41,12 @@
     "extensions",
     "prompts",
     "skills",
-    "types",
     "README.md",
     "LICENSE",
     "!extensions/win/*.dll",
     "!extensions/win/*.stamp"
   ],
-  "dependencies": {
-    "screenshot-desktop": "^1.15.6",
-    "sharp": "^0.35.5"
-  },
+  "dependencies": {},
   "peerDependencies": {
     "@earendil-works/pi-agent-core": "*",
     "@earendil-works/pi-ai": "*",
