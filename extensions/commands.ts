@@ -10,7 +10,6 @@ import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-c
 import { captureFrame } from "./capture.ts";
 import { appendBinding } from "./binding.ts";
 import { describeFailure, statusText } from "./attach.ts";
-import { pinFrame, unpinFrame } from "./frames.ts";
 import { gameIdentity } from "./identity.ts";
 import { formatSize, type Binding, type SidekickState } from "./state.ts";
 import {
@@ -30,10 +29,7 @@ const HELP = [
 	"",
 	"  /gs play [exe]     pick a game window to capture",
 	"  /gs status        show what is bound and what has been captured",
-	"  /gs frames        list frames captured this session",
-	"  /gs shot          grab a frame now and report it",
-	"  /gs pin [id]      keep a frame in context for every later turn",
-	"  /gs unpin [id|all]",
+	"  /gs frames        list frames captured this conversation",
 	"  /gs display <n>   force which display to capture from",
 	"  /gs setup         check that screen capture works here",
 	"  /gs unbind        stop capturing",
@@ -49,8 +45,7 @@ export function registerCommands(pi: ExtensionAPI, state: SidekickState): void {
 		description: "Gamer Sidekick — capture your game window into the conversation",
 		getArgumentCompletions(prefix) {
 			const subs = [
-				"play", "status", "frames", "shot", "pin", "unpin",
-				"display", "setup", "unbind", "help",
+				"play", "status", "frames", "display", "setup", "unbind", "help",
 			];
 			const hits = subs.filter((s) => s.startsWith(prefix));
 			return hits.length > 0 ? hits.map((value) => ({ value, label: value })) : null;
@@ -102,12 +97,6 @@ async function runSubcommand(
 			return cmdUnbind(state, ctx);
 		case "frames":
 			return cmdFrames(state, ctx);
-		case "shot":
-			return cmdShot(state, ctx);
-		case "pin":
-			return cmdPin(state, arg, ctx);
-		case "unpin":
-			return cmdUnpin(state, arg, ctx);
 		case "display":
 			return cmdDisplay(state, arg, ctx);
 		default:
@@ -137,7 +126,6 @@ function cmdStatus(state: SidekickState, ctx: ExtensionCommandContext): void {
 		`display   ${b.displayOverride ?? b.display?.index ?? "?"}${b.display ? `  ${b.display.width}x${b.display.height} at (${b.display.x},${b.display.y})` : ""}`,
 		`bound     ${new Date(b.boundAt).toLocaleString()}`,
 		`frames    ${state.framesCaptured} captured · ${state.framesAttached} attached · ${state.framesDropped} dropped`,
-		`pins      ${state.pinned.length > 0 ? state.pinned.join(", ") : "none"}`,
 	];
 	if (state.lastError) lines.push(`last err  ${state.lastError}`);
 	ctx.ui.notify(lines.join("\n"), state.bindingStale ? "warning" : "info");
@@ -180,26 +168,12 @@ function cmdFrames(state: SidekickState, ctx: ExtensionCommandContext): void {
 		.slice(-10)
 		.map((f) => {
 			const r = f.record;
-			const flags = `${r.pinned ? "📌" : "  "} ${r.hash}`;
-			return `#${String(r.id).padStart(3, "0")}  ${r.exe}  ${r.width}x${r.height}  ${(r.bytes / 1024).toFixed(0)}KB  ~${r.imageTokens}tok  ${new Date(r.timestamp).toLocaleTimeString()}  ${flags}`;
+			return `#${String(r.id).padStart(3, "0")}  ${r.exe}  ${r.width}x${r.height}  ${(r.bytes / 1024).toFixed(0)}KB  ~${r.imageTokens}tok  ${new Date(r.timestamp).toLocaleTimeString()}  ${r.hash}`;
 		});
 	ctx.ui.notify(`Frames captured this session (${state.frames.length}):\n${rows.join("\n")}`, "info");
 }
 
-async function cmdShot(state: SidekickState, ctx: ExtensionCommandContext): Promise<void> {
-	if (!state.binding) {
-		ctx.ui.notify("No game bound. Run /gs play first.", "warning");
-		return;
-	}
-	const outcome = await captureFrame(state, "manual shot");
-	if (!outcome.ok) {
-		state.lastError = describeFailure(outcome.failure);
-		ctx.ui.notify(`No frame: ${state.lastError}`, "warning");
-		return;
-	}
-	const r = outcome.frame.record;
-	ctx.ui.notify(`Frame #${String(r.id).padStart(3, "0")} · ${r.width}x${r.height} · ${(r.bytes / 1024).toFixed(0)}KB · ~${r.imageTokens} tokens · ${outcome.elapsedMs}ms. Pin it with /gs pin ${r.id}`, "info");
-}
+
 
 // ---------------------------------------------------------------------------
 // /gs play — the binding flow (PRD §6.1)
@@ -283,7 +257,7 @@ async function cmdPlay(state: SidekickState, query: string, ctx: ExtensionComman
 }
 
 // ---------------------------------------------------------------------------
-// /gs unbind, pin, unpin, display
+// /gs unbind, display
 // ---------------------------------------------------------------------------
 
 function cmdUnbind(state: SidekickState, ctx: ExtensionCommandContext): void {
@@ -297,19 +271,7 @@ function cmdUnbind(state: SidekickState, ctx: ExtensionCommandContext): void {
 	ctx.ui.notify(`Stopped capturing ${name}.`, "info");
 }
 
-function cmdPin(state: SidekickState, arg: string, ctx: ExtensionCommandContext): void {
-	const id = Number.parseInt(arg, 10);
-	const result = pinFrame(state, Number.isNaN(id) ? undefined : id);
-	ctx.ui.notify(result.message, result.ok ? "info" : "warning");
-}
 
-function cmdUnpin(state: SidekickState, arg: string, ctx: ExtensionCommandContext): void {
-	const trimmed = arg.trim();
-	if (trimmed === "" || trimmed === "all") return void ctx.ui.notify(unpinFrame(state, trimmed === "all" ? "all" : undefined).message, "info");
-	const id = Number.parseInt(trimmed, 10);
-	if (Number.isNaN(id)) return void ctx.ui.notify("Usage: /gs unpin <id|all>", "warning");
-	ctx.ui.notify(unpinFrame(state, id).message, "info");
-}
 
 function cmdDisplay(state: SidekickState, arg: string, ctx: ExtensionCommandContext): void {
 	if (!state.binding) {

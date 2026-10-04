@@ -26,7 +26,6 @@ function frameWith(overrides: Partial<FrameRecord> = {}): Frame {
 		bytes: 132000,
 		hash: "17047a0630d0",
 		timestamp: 1_700_000_000_000,
-		pinned: false,
 		imageTokens: 595,
 		...overrides,
 	};
@@ -63,18 +62,4 @@ test("an occluded frame names the occluder so the model knows the scene is incom
 test("multiple occluders are all listed", () => {
 	const caption = captionFor(frameWith({ coveredBy: ["Windows Terminal", "Taskbar"] }));
 	assert.match(caption, /Windows Terminal, Taskbar was on top/);
-});
-
-test("the frame id in the caption is what hasFrameCaption searches for", async () => {
-	// The two must stay in lockstep: injection dedupes on the caption needle,
-	// so a caption that does not contain the needle would be re-injected on
-	// every provider call in the turn, multiplying image tokens each time.
-	const { hasFrameCaption } = await import("../extensions/attach.ts");
-	const message = {
-		role: "user",
-		content: [{ type: "text", text: captionFor(frameWith()) }],
-		timestamp: 0,
-	};
-	assert.equal(hasFrameCaption([message], 7), true);
-	assert.equal(hasFrameCaption([message], 8), false);
 });

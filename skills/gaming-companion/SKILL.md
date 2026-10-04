@@ -1,6 +1,6 @@
 ---
 name: gaming-companion
-description: Use when a Gamer Sidekick frame is attached to the conversation and the player is asking about what is on their screen in a game — reading the scene, deciding what to do next, choosing dialogue or builds, or comparing against a pinned earlier frame. Also covers `/gs` troubleshooting, capture failures, and session switching.
+description: Use when a Gamer Sidekick frame is attached to the conversation and the player is asking about what is on their screen in a game — reading the scene, deciding what to do next, choosing dialogue or builds, or comparing against an earlier frame. Also covers `/gs` troubleshooting, capture failures, and binding a window.
 ---
 
 # Gaming companion
@@ -9,7 +9,7 @@ A frame of the player's game window is attached to the turn. Read it before answ
 
 ## Reading the frame
 
-- The caption above each image names the executable and the frame id (`[FRAME #003 · sora_2nd.exe]`). Prefer the frame matching the player's question — a pinned `before` frame goes first, the live one last.
+- The caption above each image names the executable and the frame id (`[FRAME #003 · sora_2nd.exe]`). Frames are part of the conversation, so an older one is still there to compare against — pick the one that answers the question, not simply the newest.
 - Frames are downscaled to a 1280px long edge and JPEG at q80. Small UI text, inventory grids and stat tables may be illegible. If the answer depends on detail you cannot resolve, say so and ask for a targeted question instead of inventing numbers.
 - A frame caption of `none` in the turn history means capture failed — the question is still answerable, but you have no visual evidence. Say so plainly rather than describing a scene you cannot see.
 
@@ -30,6 +30,6 @@ A frame of the player's game window is attached to the turn. Read it before answ
 
 - No game bound — `/gs play` picks one. `/gs unbind` clears it. A handle going stale (game closed, window recreated) is reported by `/gs status`; re-run `/gs play`.
 - Black frame — exclusive fullscreen is not capturable through the desktop-grab path. Switch to borderless or windowed, then re-ask. Nothing is lost; the question still gets answered without the frame.
-- Frames cost tokens. Each one lands in the context for the turns that reference it. Prefer pinning one good frame over capturing repeatedly.
+- Frames cost tokens, and they accumulate: each one stays in the conversation. Do not ask for a re-capture of something already visible in an earlier frame.
 - `/gs status` reports what is bound; re-run `/gs play` if the handle went stale (game restarted, window recreated).
 - Conversations belong to the player. `/gs` never creates, renames or switches one — if capture seems missing in a different conversation, that conversation simply has no binding yet and `/gs play` there fixes it.

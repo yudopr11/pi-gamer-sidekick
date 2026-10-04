@@ -14,12 +14,6 @@ export const MAX_LONG_EDGE = 1280;
 /** JPEG quality used for the re-encode. */
 export const JPEG_QUALITY = 80;
 
-/** Live frames attached to a single turn. */
-export const MAX_LIVE_FRAMES = 1;
-
-/** Pinned frames kept in context across turns, LRU-evicted. */
-export const MAX_PINNED_FRAMES = 3;
-
 /** Per-image request budget in seconds. Over this, E10 fires. */
 export const CAPTURE_BUDGET_MS = 3000;
 

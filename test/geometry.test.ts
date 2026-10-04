@@ -6,7 +6,6 @@ import {
 	estimateImageTokens,
 	fitLongEdge,
 	MAX_LONG_EDGE,
-	MAX_PINNED_FRAMES,
 } from "../extensions/geometry.ts";
 import { filterWindows, type WindowInfo } from "../extensions/windowinfo.ts";
 
@@ -116,5 +115,4 @@ test("image token estimate uses 512px tiles plus a base", () => {
 
 test("budget constants match the PRD", () => {
 	assert.equal(MAX_LONG_EDGE, 1280);
-	assert.equal(MAX_PINNED_FRAMES, 3);
 });

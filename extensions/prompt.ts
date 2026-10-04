@@ -22,7 +22,6 @@ export function buildGamingPrompt(state: SidekickState): string | null {
 	if (!state.available || !binding) return null;
 
 	const identity: GameIdentity = binding.identity;
-	const pins = state.pinned.length;
 
 	const lines = [
 		"## Gaming companion",
@@ -37,7 +36,7 @@ export function buildGamingPrompt(state: SidekickState): string | null {
 		"- Answer the question asked. Game commentary for its own sake is noise.",
 		"",
 		`You can pull a **fresh** frame mid-answer with the \`game_frame\` tool, and inspect the bound window with \`game_window\`. ` +
-			(pins > 0 ? `${pins} frame(s) are pinned and re-attached to every turn.` : "No frames are pinned."),
+			`Earlier frames stay in the conversation, so the player can refer back to them by number.`,
 	];
 
 	return lines.join("\n");

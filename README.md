@@ -63,11 +63,21 @@ carry frame metadata only: id, size, byte count, token cost, timestamp.
 | `/gs unbind` | Stop capturing. |
 | `/gs status` | What is bound, whether it is still alive, frame counters. |
 | `/gs frames` | List captured frames with ids, size and token cost. |
-| `/gs pin <id>` | Keep a frame in every future turn as the "before" reference. |
-| `/gs unpin <id>` | Release a pinned frame. |
-| `/gs shot` | Capture without asking anything. |
 | `/gs display [n]` | Override which display the window is looked for on. |
 | `/gs help` | This list. |
+
+## Frames are part of the conversation
+
+Each time you press `Enter`, the frame lands in the transcript as an ordinary
+message with a `[FRAME #001 · …]` caption and the image beside it. That means:
+
+- you can see the frame in your scrollback, and refer to it by number later;
+- it stays in context on following turns without anything re-sending it;
+- `/resume` brings it back with the conversation.
+
+The cost is disk. A frame is ~150 KB of base64 in the session file, and ~595
+image tokens of context, for every message you send while a window is bound.
+Long conversations accumulate; `/compact` is the release valve.
 
 ## Your conversations are yours
 

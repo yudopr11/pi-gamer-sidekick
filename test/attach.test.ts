@@ -1,14 +1,12 @@
 /**
- * Tests for the frame attachment hooks — the load-bearing mechanism (PRD G-D4).
+ * Tests for the frame attachment hook — the load-bearing mechanism (PRD §6.3.2,
+ * amendment A2).
  *
- * Two invariants carry the whole design and are asserted here:
- *
- *   1. No image bytes are ever persisted. `before_agent_start` appends metadata
- *      only; the JPEG reaches the model exclusively through the `context`
- *      handler, which pi applies request-locally and then discards. (INV-2)
- *   2. The `context` handler runs before EVERY provider call in a turn, so it
- *      must be idempotent — re-injecting would duplicate the image and multiply
- *      token cost on every follow-up call.
+ * The frame is returned from `before_agent_start` as a custom message, which is
+ * what puts it in the normal conversation: pi appends it after the player's
+ * question, converts it to a user message for the provider, persists it, and
+ * renders it. So the two things worth asserting are that the returned message
+ * carries the image, and that the metadata entry beside it does not.
  *
  * The capture step is injected so these tests need neither Windows nor a game.
  */
@@ -17,13 +15,13 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
-import { buildFrameMessage, hasFrameCaption, registerAttachment } from "../extensions/attach.ts";
+import { buildFrameMessage, registerAttachment } from "../extensions/attach.ts";
 import { createState, type Frame, type SidekickState } from "../extensions/state.ts";
 import type { CaptureOutcome } from "../extensions/capture.ts";
 
 const JPEG_B64 = Buffer.from("not-really-a-jpeg").toString("base64");
 
-function makeFrame(id: number, pinned = false): Frame {
+function makeFrame(id: number): Frame {
 	return {
 		record: {
 			id,
@@ -33,7 +31,6 @@ function makeFrame(id: number, pinned = false): Frame {
 			bytes: 103172,
 			hash: "fc0b4ccbf3a4",
 			timestamp: 1_700_000_000_000 + id,
-			pinned,
 			imageTokens: 595,
 		},
 		data: JPEG_B64,
@@ -115,56 +112,36 @@ describe("frame attachment", () => {
 		assert.equal(JSON.stringify(appended[0]?.data).includes(JPEG_B64), false);
 	});
 
-	it("injects the frame into the request at the context event", async () => {
+	it("returns the frame as a conversation message", async () => {
 		const state = boundState();
 		const { pi, fire } = fakePi();
 		registerAttachment(pi, state, async () => okCapture(makeFrame(1)));
 
-		await fire("before_agent_start", { type: "before_agent_start", prompt: "who is that?" });
-		const [result] = await fire("context", {
-			type: "context",
-			messages: [{ role: "user", content: "who is that?", timestamp: 1 }],
+		const [result] = await fire("before_agent_start", {
+			type: "before_agent_start",
+			prompt: "who is that?",
 		});
 
-		const messages = (result as { messages: unknown[] }).messages;
-		// The live frame is appended AFTER the question, so the model reads the
-		// ask first and the pixels second.
-		assert.equal(messages.length, 2);
-		assert.deepEqual(messages[0], { role: "user", content: "who is that?", timestamp: 1 });
-
-		const injected = messages[1] as { role: string; content: (Record<string, string>)[] };
-		assert.equal(injected.role, "user");
+		// pi pushes this onto the conversation right after the question.
+		const message = (result as { message?: { customType: string; content: Record<string, string>[] } }).message;
+		assert.ok(message, "the turn must get a frame message");
+		assert.equal(message?.customType, "gamer_sidekick_frame");
 		assert.deepEqual(
-			injected.content.map((c) => c.type),
+			message?.content.map((c) => c.type),
 			["text", "image"],
 		);
 		// Caption first, then pixels — providers read content in order.
-		const [text, image] = injected.content as [{ text: string }, { data: string; mimeType: string }];
+		const [text, image] = message?.content as [{ text: string }, { data: string; mimeType: string }];
 		assert.match(text.text, /\[FRAME #001/);
 		assert.match(text.text, /sora_2nd\.exe/);
 		assert.equal(image.data, JPEG_B64);
 		assert.equal(image.mimeType, "image/jpeg");
 	});
 
-	it("is idempotent across the repeated context calls of one turn", async () => {
-		const state = boundState();
-		const { pi, fire } = fakePi();
-		registerAttachment(pi, state, async () => okCapture(makeFrame(1)));
-
-		await fire("before_agent_start", { type: "before_agent_start", prompt: "q" });
-
-		const payload = {
-			type: "context",
-			messages: [{ role: "user", content: "q", timestamp: 1 }],
-		};
-		const first = (await fire("context", payload))[0] as { messages: unknown[] };
-		// Second provider call in the same turn carries what the first returned.
-		const second = (await fire("context", { type: "context", messages: first.messages }))[0] as {
-			messages: unknown[];
-		};
-
-		assert.equal(first.messages.length, 2);
-		assert.equal(second, undefined, "already-injected frame must not be injected again");
+	it("builds a displayable message so the player sees the frame", () => {
+		const message = buildFrameMessage(makeFrame(3));
+		assert.equal(message.display, true);
+		assert.equal(message.content.length, 2);
 	});
 
 	it("waits for the startup probe before deciding to stay silent", async () => {
@@ -222,41 +199,21 @@ describe("frame attachment", () => {
 		assert.match(notified[0] ?? "", /\/gs play/);
 	});
 
-	it("places pinned frames at the head and the live frame at the tail", async () => {
+	it("keeps capturing once a window is bound", async () => {
 		const state = boundState();
 		const { pi, fire } = fakePi();
 		registerAttachment(pi, state, async () => okCapture(makeFrame(2)));
 
-		state.frames.push(makeFrame(1, true));
-		state.pinned.push(1);
-
 		await fire("before_agent_start", { type: "before_agent_start", prompt: "compare" });
-		const [result] = await fire("context", {
-			type: "context",
-			messages: [{ role: "user", content: "compare", timestamp: 1 }],
+		const [result] = await fire("before_agent_start", {
+			type: "before_agent_start",
+			prompt: "and now?",
 		});
 
-		const messages = (result as { messages: unknown[] }).messages;
-		assert.equal(messages.length, 3);
-		const first = (messages[0] as { content: { text: string }[] }).content[0] as { text: string };
-		const last = (messages[2] as { content: { text: string }[] }).content[0] as { text: string };
-		assert.match(first.text, /#001/, "the 'before' reference comes before the question");
-		assert.match(last.text, /#002/, "the current frame comes after the question");
-	});
-});
-
-describe("hasFrameCaption", () => {
-	it("matches on the padded caption needle", () => {
-		assert.equal(hasFrameCaption([buildFrameMessage(makeFrame(7), 0)], 7), true);
-		assert.equal(
-			hasFrameCaption([{ role: "user", content: "see [FRAME #007 · sora_2nd.exe]", timestamp: 0 }], 7),
-			true,
-		);
-	});
-
-	it("does not match a different frame or a non-user message", () => {
-		assert.equal(hasFrameCaption([{ role: "user", content: "[FRAME #008 · x]", timestamp: 0 }], 7), false);
-		assert.equal(hasFrameCaption([{ role: "assistant", content: "[FRAME #007 · x]", timestamp: 0 }], 7), false);
-		assert.equal(hasFrameCaption([], 7), false);
+		// One capture per turn, and the new frame is the one that ships. Frames
+		// already in the conversation need no re-injection.
+		assert.equal(state.framesAttached, 2);
+		const message = (result as { message?: { content: { text: string }[] } }).message;
+		assert.match(message?.content[0]?.text ?? "", /#002/);
 	});
 });

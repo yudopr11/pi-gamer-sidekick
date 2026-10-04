@@ -16,7 +16,7 @@
 | Default model | **Cheapest vision-capable model available in pi.** Recommended `gpt-6-luna` ($0.10 in / $0.50 out per 1M) |
 | Intended games | **Single-player, offline, and PvE/co-op titles. Not competitive or online multiplayer (§9).** |
 | Repository | `git`, branch `main`, root `C:/Users/yudop/Projects/sidekick` |
-| Amendment | **A1 (owner, 2026-10-04)** — per-game sessions, auto-switching and `/gs follow` are **withdrawn**. See [§0 Amendments](#0-amendments). |
+| Amendment | **A2 (owner, 2026-10-04)** — frames are ordinary conversation messages; `/gs pin`, `/gs unpin` and `/gs shot` are **withdrawn**. See [§0 Amendments](#0-amendments). |
 
 ---
 
@@ -48,6 +48,40 @@ to type, so the foreground window *is* the terminal. Foreground targeting could 
 ever have been right under a picture-in-picture overlay this package does not have.
 The bound handle is re-validated on every capture instead, which is what §6.2.1
 already did.
+
+### A2 — Frames are ordinary conversation messages (owner decision, 2026-10-04)
+
+**Withdrawn:** `/gs pin`, `/gs unpin`, `/gs pins`, `/gs compare`, `/gs shot`, the
+whole pinning mechanism, and the request-local `context` injection that §6.3
+originally specified.
+
+**Why.** The player can already see the frame in the terminal, so pinning is a
+second mechanism doing a job the transcript already does. And they asked for the
+frame to be *in* the conversation rather than in a request — which is the
+opposite of what G-D4 optimised for.
+
+**What it means now.**
+
+- `before_agent_start` returns `{ message }` carrying the caption and the
+  `ImageContent`. pi appends it to the conversation after the question, maps it
+  to a user message for the provider (`convertToLlm`, `case "custom"`), persists
+  it as a top-level `custom_message` entry, and renders it when `display: true`.
+- Frames stay in context on later turns for free. Nothing re-sends them.
+- There is no pin budget, no frame budget and no idempotence guard — one capture
+  per turn, once, in `before_agent_start`, which fires once per agent loop.
+
+**The cost, stated plainly.** INV-2 is **reversed**. A frame is now a session
+entry, so its base64 lands in the conversation file: ~150 KB and ~595 image
+tokens per turn, for as long as a window is bound. This is the price of a frame
+you can scroll back to. `/compact` is the release valve.
+
+**Measured** (live, `scratch/probe-conversation.ts`, Trails in the Sky 2nd
+Chapter): `234742 custom_message | customType=gamer_sidekick_frame display=true
+blocks="text,image(234336b)"` in a 271 KB session file, and the model answered
+with a correct reading of the on-screen fishing minigame.
+
+**Superseded:** G-D4, INV-2, AC-GS-09, §6.3.2, §6.4 (entirely), §6.8's pin rows,
+E8, G-D5, G-O3.
 ---
 
 ## 1. What This Is — TL;DR
@@ -190,7 +224,7 @@ Explicitly **not** built. Anything here needs a new PRD.
 
 **Invariant INV-1:** capturing never blocks, delays, or degrades the user's game. Capture happens only after `Enter`, on the pi thread, never on the game's thread.
 
-**Invariant INV-2:** Gamer Sidekick never writes frame pixels to any file, anywhere, ever.
+~~**Invariant INV-2:** Gamer Sidekick never writes frame pixels to any file, anywhere, ever.~~ **REVERSED by A2** — frames are conversation entries, so their bytes are written to the session file on purpose.
 
 **Invariant INV-3:** Gamer Sidekick is inert until a game window is bound. It never captures your screen because it felt like it.
 
@@ -711,7 +745,7 @@ M2 is the milestone that matters. **If frames cannot be attached without hitting
 | **G-D1** | Ship as a pi package, not a standalone app | Pi already provides image attachment, streaming, sessions, compaction, model selection, and cost accounting. Rebuilding them is the exact cost the pivot avoids |
 | **G-D2** | **No overlay window in v0.1.0** | Unreachable from inside a pi package: `registerShortcut` needs pi's terminal focused, and RPC mode makes `onTerminalInput()` a no-op. The window is possible only from an external host (§11.1) |
 | **G-D3** | Capture target is a **bound window**, not the foreground window | The foreground window at capture time is the terminal the user is typing in. Foreground capture is structurally wrong for this product |
-| **G-D4** | Inject frames at the **`context`** event, not by rewriting the user message | `before_agent_start`'s message result is persisted to the session file; that would write ~330 KB of base64 per turn. `context` is request-local and restores state afterwards, so pixels never touch disk (INV-2) |
+| ~~**G-D4**~~ **SUPERSEDED by A2** | Inject frames at the **`context`** event, not by rewriting the user message | `before_agent_start`'s message result is persisted to the session file; that would write ~330 KB of base64 per turn. The player wants the frame *in* the conversation, so the old rationale no longer applies. Frames are now returned as a custom message from `before_agent_start`, which costs disk and buys scrollback, `/resume` and persistence for free |
 | **G-D5** | Frame budget: 1 live + 3 pinned | Bounded cost and context coherence; more than one frame per turn answers almost no real question |
 | **G-D6** | No model list, pricing table, or API-key handling | pi owns all three. Duplicating them guarantees drift |
 | **G-D7** | Non-competitive games only; advisory list, `warn` by default | Carried forward from the deprecated PRD; product policy, not architecture |
@@ -740,7 +774,7 @@ Before development starts, confirm:
 
 - [ ] **G-D3 understood and accepted:** the capture target is a bound window, not the foreground window (§6.1.1). This is the difference between a working product and one that photographs a terminal.
 - [ ] **G-D2 accepted:** no overlay in v0.1.0. The user alt-tabs to a terminal. (§4.2, §11 R-1)
-- [ ] **G-D4 accepted:** frames are injected at the `context` event precisely so image bytes never reach disk. This is the privacy guarantee, and it is enforced by AC-GS-09.
+- [x] ~~**G-D4 accepted: frames are injected at the `context` event so image bytes never reach disk. Enforced by AC-GS-09.~~ **SUPERSEDED by A2** — the player traded the disk guarantee for frames in the conversation.
 - [ ] §6.3.2's `context`-injection mechanism is understood to be load-bearing. If it does not work, M2 stops and the package is re-scoped.
 - [ ] Open decisions **G-O1 … G-O8** are answered.
 - [ ] The competitive-title policy (§9) is accepted as a product constraint.

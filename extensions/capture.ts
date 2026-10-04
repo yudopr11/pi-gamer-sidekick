@@ -52,9 +52,9 @@ async function loadScreenshot(): Promise<ScreenshotDesktop | null> {
 /**
  * Capture the bound window's current frame.
  *
- * `reason` is recorded for provenance only — it distinguishes a capture the
- * user asked for (`/gs shot`) from the automatic one taken when they pressed
- * Enter, and from a model-initiated refresh (`game_frame` tool).
+ * `reason` is recorded for provenance only — it distinguishes the automatic
+ * capture taken when the user pressed Enter from a model-initiated refresh
+ * (`game_frame` tool).
  */
 export async function captureFrame(state: SidekickState, reason: string): Promise<CaptureOutcome> {
 	const started = Date.now();
@@ -190,7 +190,6 @@ export async function captureFrame(state: SidekickState, reason: string): Promis
 		bytes: encoded.byteLength,
 		hash: createHash("sha256").update(encoded).digest("hex").slice(0, 12),
 		timestamp: Date.now(),
-		pinned: false,
 		imageTokens: estimateImageTokens(size),
 		// Non-empty only when the desktop-grab fallback was used with something
 		// in the way. Travels with the metadata entry so the caption can warn.
@@ -237,19 +236,14 @@ async function isBlack(jpeg: Buffer): Promise<boolean> {
 /**
  * Keep the in-memory frame ledger bounded.
  *
- * Pinned frames are never dropped. Unpinned frames fall off the end once the
- * ledger exceeds the pin limit plus a small tail, so `/gs frames` still shows
- * recent history without the package holding megabytes of base64 forever.
+ * Frames are kept only so `/gs frames` and `/gs status` have a recent ledger.
+ * The conversation holds its own copies, so this buffer falls off the end once
+ * it exceeds a small tail rather than the package holding megabytes of base64
+ * for the whole session.
  */
 function pruneFrames(state: SidekickState): void {
 	const keep = 8;
-	if (state.frames.length <= state.pinned.length + keep) return;
-	const pinnedSet = new Set(state.pinned);
-	while (state.frames.length > pinnedSet.size + keep) {
-		const index = state.frames.findIndex((f) => !pinnedSet.has(f.record.id));
-		if (index < 0) break;
-		state.frames.splice(index, 1);
-	}
+	while (state.frames.length > keep) state.frames.shift();
 }
 
 function describe(error: unknown): string {

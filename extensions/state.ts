@@ -41,7 +41,6 @@ export interface FrameRecord {
 	/** First 12 hex chars of the JPEG sha256, for dedupe and provenance. */
 	hash: string;
 	timestamp: number;
-	pinned: boolean;
 	/** Estimated OpenAI vision tokens for this frame. */
 	imageTokens: number;
 	/**
@@ -89,10 +88,8 @@ export interface SidekickState {
 	/** True while the binding has been found stale at session start. */
 	bindingStale: boolean;
 
-	/** Captured this session. */
+	/** Captured this session. Bounded; see pruneFrames in capture.ts. */
 	frames: Frame[];
-	/** Pinned frame ids, oldest first. Bounded by MAX_PINNED_FRAMES. */
-	pinned: number[];
 	nextFrameId: number;
 
 	/** The frame captured for the turn currently in flight. */
@@ -115,7 +112,6 @@ export function createState(): SidekickState {
 		binding: null,
 		bindingStale: false,
 		frames: [],
-		pinned: [],
 		nextFrameId: 1,
 		pendingFrame: null,
 		framesCaptured: 0,
@@ -132,9 +128,8 @@ export function findFrame(state: SidekickState, id: number): Frame | undefined {
 }
 
 /** Metadata only — safe to hand to `pi.appendEntry`. */
-export function toRecord(frame: Frame): Omit<FrameRecord, "pinned"> {
-	const { pinned: _pinned, ...rest } = frame.record;
-	return rest;
+export function toRecord(frame: Frame): FrameRecord {
+	return frame.record;
 }
 
 /** Compact human-readable size for the status line. */

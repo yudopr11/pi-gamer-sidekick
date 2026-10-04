@@ -11,7 +11,7 @@
 import { Type } from "typebox";
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { captureFrame } from "./capture.ts";
-import { captionFor, pinnedFrames } from "./frames.ts";
+import { captionFor } from "./frames.ts";
 import { describeFailure } from "./attach.ts";
 import type { SidekickState } from "./state.ts";
 
@@ -24,7 +24,6 @@ interface GameFrameDetails {
 	elapsedMs?: number;
 	bytes?: number;
 	imageTokens?: number;
-	pinned?: number[];
 }
 
 /** Is this tool worth exposing right now? */
@@ -96,7 +95,6 @@ export function registerTools(pi: ExtensionAPI, state: SidekickState): void {
 					elapsedMs: outcome.elapsedMs,
 					bytes: frame.record.bytes,
 					imageTokens: frame.record.imageTokens,
-					pinned: [...state.pinned],
 				} satisfies GameFrameDetails,
 			};
 		},
@@ -130,7 +128,6 @@ export function registerTools(pi: ExtensionAPI, state: SidekickState): void {
 				displayIndex: b.displayOverride ?? b.display?.index ?? 0,
 				boundAt: b.boundAt,
 				framesCaptured: state.framesCaptured,
-				pinned: pinnedFrames(state).map((f) => f.record.id),
 			};
 			return {
 				content: [
@@ -138,7 +135,7 @@ export function registerTools(pi: ExtensionAPI, state: SidekickState): void {
 						type: "text",
 						text:
 							`Bound window: ${b.identity.exe} "${b.title}" ${b.bounds.width}x${b.bounds.height} on display ${details.displayIndex}. ` +
-							`${state.framesCaptured} frame(s) captured this session, ${details.pinned?.length ?? 0} pinned.`,
+							`${state.framesCaptured} frame(s) captured this session.`,
 					},
 				],
 				details,
@@ -175,5 +172,4 @@ interface GameWindowDetails {
 	displayIndex?: number;
 	boundAt?: string;
 	framesCaptured?: number;
-	pinned?: number[];
 }

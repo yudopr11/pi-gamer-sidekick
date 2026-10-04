@@ -16,9 +16,11 @@ Not bound yet? Nothing else in this session captures anything.
 ## While it is live
 
 - `/gs frames` — list captured frames with their ids, size and token cost.
-- `/gs pin <id>` / `/gs unpin <id>` — keep a frame in every future turn as the "before" reference, so "compare with earlier" works.
-- `/gs shot` — capture without asking anything.
 - `/gs status` — what is bound, whether it is still alive, and the running frame counters.
+
+Every message you send while a window is bound carries a frame into the
+conversation. They stay in context on later turns, so you can refer back to one
+by number without re-capturing anything.
 
 ## Notes
 
