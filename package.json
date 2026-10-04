@@ -2,15 +2,36 @@
   "name": "pi-gamer-sidekick",
   "version": "0.1.0",
   "description": "A pi package that captures your game window and attaches the frame to your question.",
-  "keywords": ["pi-package"],
+  "author": "Yudho Prakoso <yudopr10@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yudopr11/pi-gamer-sidekick.git"
+  },
+  "homepage": "https://github.com/yudopr11/pi-gamer-sidekick#readme",
+  "bugs": {
+    "url": "https://github.com/yudopr11/pi-gamer-sidekick/issues"
+  },
+  "keywords": [
+    "pi-package"
+  ],
   "license": "MIT",
   "type": "module",
-  "engines": { "node": ">=20" },
-  "os": ["win32"],
+  "engines": {
+    "node": ">=20"
+  },
+  "os": [
+    "win32"
+  ],
   "pi": {
-    "extensions": ["./extensions/index.ts"],
-    "prompts": ["./prompts/*.md"],
-    "skills": ["./skills/*/SKILL.md"]
+    "extensions": [
+      "./extensions/index.ts"
+    ],
+    "prompts": [
+      "./prompts/*.md"
+    ],
+    "skills": [
+      "./skills/*/SKILL.md"
+    ]
   },
   "scripts": {
     "test": "node --test --experimental-strip-types \"test/*.test.ts\"",
@@ -28,7 +49,7 @@
   ],
   "dependencies": {
     "screenshot-desktop": "^1.15.6",
-    "sharp": "^0.33.0"
+    "sharp": "^0.35.5"
   },
   "peerDependencies": {
     "@earendil-works/pi-agent-core": "*",

@@ -7,30 +7,42 @@ screenshot gallery, no second monitor.
 
 ## Install
 
+### From GitHub (recommended)
+
+```bash
+pi install git:github.com/yudopr11/pi-gamer-sidekick
+```
+
+pi clones the repo, runs `npm install` for it and registers it in
+`~/.pi/agent/settings.json`. **This is the only installation you need** — it
+pulls `sharp` and `screenshot-desktop` itself, and gets updates with `pi update`.
+
+Verify, update, remove:
+
+```bash
+pi list                                                   # is it registered
+pi update --extensions                                    # pull a newer revision
+pi remove git:github.com/yudopr11/pi-gamer-sidekick
+```
+
+### From a local clone
+
+Useful while you are working on it — pi loads the extension, prompt and skill
+straight from the working tree, so edits take effect on the next start.
+
 ```bash
 cd path/to/pi-gamer-sidekick
-npm install                 # sharp + screenshot-desktop; a local package is never installed by pi itself
+npm install                # sharp + screenshot-desktop
 pi install C:\path\to\pi-gamer-sidekick
+pi -e C:\path\to\pi-gamer-sidekick    # or: try it for one run only
 ```
 
-`pi install` writes a **local path** declaration into `~/.pi/agent/settings.json`
-(personal scope) or `.pi/settings.json` with `--local`. Nothing is copied —
-pi loads the extension, prompt and skill straight from the working tree, so
-edits take effect on the next start. Use an absolute path: a relative one
-resolves against the settings file that holds it, not against your shell.
+A local package is **never** installed or updated by pi — `npm install` in that
+directory is yours to run, and its dependencies are yours to keep current.
+Because nothing is copied, an absolute path matters: a relative one resolves
+against the settings file that holds it, not against your shell.
 
-Check it, remove it:
-
-```bash
-pi list                     # confirm the package is registered
-pi remove C:\path\to\pi-gamer-sidekick
-```
-
-To try it for a single run without touching settings:
-
-```bash
-pi -e C:\path\to\pi-gamer-sidekick
-```
+`pi remove C:\path\to\pi-gamer-sidekick` unregisters it.
 
 Then, in a session:
 
@@ -136,6 +148,41 @@ binding with it. Start a different conversation and it starts unbound; run
 
 `game_frame` — capture now and return the image. `game_window` — metadata about
 the bound window, no pixels. Both stay dormant until a window is bound.
+
+## Security
+
+No telemetry, no analytics, no network calls — the package itself makes none.
+Anything that leaves your machine does so through pi, to whatever model you
+have configured.
+
+**It compiles C# the first time you run it.** There is no prebuilt binary in the
+repo. `extensions/win/bootstrap.ps1` feeds `extensions/win/win32.cs` to
+`Add-Type`, which builds `gs_win32.dll` beside it and stamps the build so it
+compiles again only when the source changes. The scripts run with
+`-ExecutionPolicy Bypass`, which is scoped to that one invocation rather than
+loosened machine-wide. The C# is 219 lines of P/Invoke and does no network
+access, launches no processes, touches no registry and writes no files — read
+it, it is not a black box.
+
+**No shell is ever involved.** Window queries go through `execFile` with an
+argument vector, never `exec`, so there is nothing for a value to be escaped
+into. Script names are string literals in the source. The single argument is a
+window handle, and the PowerShell side casts it to `[long]`, which throws
+rather than executing anything.
+
+**What it can see.** Every visible top-level window's title and process path —
+that is what makes `/gs play`'s picker possible — and the pixels of the one
+window you bind. Nothing else is read. The package never writes an image to
+disk; frames become base64 inside pi's own session file, which is yours to
+delete or compact. (`scratch/probe-capture.ts` is a development probe and
+writes a JPEG to `%TEMP%` so you can eyeball the pipeline; it is not part of
+the package and never runs unless you type its command.)
+
+**Dependencies.** Two: `sharp` (resize/encode/stats) and `screenshot-desktop`
+(full-display grab, used only as a fallback when a window cannot render
+itself). Both are audited and both were checked clean at the version pinned
+here. pi's own packages are `peerDependencies` and are never bundled, so the
+package cannot end up shipping a second copy of your agent.
 
 ## Limits
 

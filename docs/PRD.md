@@ -15,7 +15,7 @@
 | AI provider | Whatever pi is configured with — recommended **OpenAI** via `OPENAI_API_KEY`, `openai-responses` API |
 | Default model | **Cheapest vision-capable model available in pi.** Recommended `gpt-6-luna` ($0.10 in / $0.50 out per 1M) |
 | Intended games | **Single-player, offline, and PvE/co-op titles. Not competitive or online multiplayer (§9).** |
-| Repository | `git`, branch `main`, root `C:/Users/yudop/Projects/sidekick` |
+| Repository | `git`, branch `main`, package root is the repo root |
 | Amendment | **A2 (owner, 2026-10-04)** — frames are ordinary conversation messages; `/gs pin`, `/gs unpin` and `/gs shot` are **withdrawn**. See [§0 Amendments](#0-amendments). |
 
 ---

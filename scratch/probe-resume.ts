@@ -10,12 +10,19 @@
  */
 
 import { spawn } from "node:child_process";
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { gameIdentity } from "../extensions/identity.ts";
 
-const LAUNCHER = "C:/Users/yudop/.pi/agent/bin/pi-launcher.js";
+// pi's node entry point, so the probe never depends on the shell's PATH or on
+// one developer's home directory. Override with PI_LAUNCHER if yours differs.
+const LAUNCHER = process.env.PI_LAUNCHER ?? join(homedir(), ".pi", "agent", "bin", "pi-launcher.js");
+if (!existsSync(LAUNCHER)) {
+	console.error(`Cannot find pi's launcher at ${LAUNCHER}. Set PI_LAUNCHER to its path.`);
+	process.exit(1);
+}
 const GAME = process.env.GS_GAME ?? "sora_2nd";
 const DIR = ".scratch/probe-resume";
 
