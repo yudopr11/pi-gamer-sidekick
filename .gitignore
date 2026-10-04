@@ -7,6 +7,11 @@ node_modules/
 dist/
 dist-ssr/
 
+# Build artifacts
+# The Win32 enumeration shim is compiled on first use from win32.cs.
+extensions/win/gs_win32.dll
+extensions/win/gs_win32.stamp
+
 # Runtime artifacts
 *.log
 verbose.log

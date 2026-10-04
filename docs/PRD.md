@@ -1,802 +1,682 @@
-# Sidekick — Product Requirements Document
+# Gamer Sidekick — Product Requirements Document
 
 ## Document Control
 
 | Field | Value |
 | --- | --- |
-| Product | Sidekick |
-| Version | **1.2.0 (Draft for review)** |
-| Supersedes | 1.1.0 |
+| Product | **Gamer Sidekick** (was: Sidekick) |
+| Version | **0.1.0 (Draft for review)** |
+| Package | `pi-gamer-sidekick` (npm, keyword `pi-package`) |
 | Date | 2026-10-04 |
 | Status | Draft — awaiting review. **No development starts until this is approved.** |
-| Target platforms | Windows 10 1809+ / Windows 11 (x64 only, pilot) |
+| Supersedes | ~~Sidekick 1.2.0 (standalone Tauri app)~~ → [`PRD-standalone-tauri.md`](./PRD-standalone-tauri.md) (**deprecated**, retained for history) |
+| Target platform | **Windows 10 1809+ / Windows 11 (x64)** |
+| Delivery form | **A pi package.** No standalone binary. No installer. No Rust. No WebView. |
+| AI provider | Whatever pi is configured with — recommended **OpenAI** via `OPENAI_API_KEY`, `openai-responses` API |
+| Default model | **Cheapest vision-capable model available in pi.** Recommended `gpt-6-luna` ($0.10 in / $0.50 out per 1M) |
 | Intended games | **Single-player, offline, and PvE/co-op titles. Not competitive or online multiplayer (§9).** |
-| Stack | Rust 1.99 (stable), Tauri v2, WebView2 (TypeScript, React, Tailwind CSS) |
-| AI provider | OpenAI — **Responses API** (`POST /v1/responses`) |
-| Default model | **`gpt-6-luna`** (cheapest; $0.10 in / $0.50 out per 1M tokens) |
-| Repository | `git` initialised on branch `main` at project root |
-| Verification toolchain present | node v22.23.3, npm 12.2.0, cargo/rustc 1.99.0 |
+| Repository | `git`, branch `main`, root `C:/Users/yudop/Projects/sidekick` |
 
 ---
 
-## 1. What Changed From v1.0 / v1.1 (read this first)
+## 1. What This Is — TL;DR
 
-### 1.1 Resolved by owner decision (v1.1 → v1.2)
+**Gamer Sidekick is a pi package that teaches pi to see your game.**
 
-| ID | v1.1 open question | Decision | Consequence in this document |
-| --- | --- | --- | --- |
-| C11 | **D2** — policy for competitive titles | **The app is built for non-competitive, offline, single-player/PvE games. Online competitive titles are out of scope.** | §9 rewritten as a hard product constraint; the integrity notice text changed; an advisory (non-blocking) competitive-title warning ships behind a config switch that can harden to a block later |
-| C12 | **D3** — which OpenAI API surface | **Responses API** (`/v1/responses`), streaming | §6.6 rewritten with the concrete request shape, SSE event names, and `store: false`; reasoning control via `reasoning.effort` |
-| C13 | **D4** — default model | **Cheapest models.** Default `gpt-6-luna`; picker sorts cheapest-first with per-model price tags | §6.7 rebuilt around a cost-sorted picker; compaction also runs on the cheapest model |
-| C14 | **D9** — cost guardrails | **None. It is the user's own key and their spend.** Just surface usage and price in the overlay | §6.6.4 usage footer + `/usage` panel; no caps, no throttling, no monthly ceilings. `max_output_tokens` survives only as a *latency* bound, not a spending bound |
-| C15 | **D10** — repository | **Git repo created** on branch `main` | Repo-local identity placeholder set (`Sidekick Dev <dev@sidekick.local>`) — **owner should replace it**; see §16 |
+You keep pi open in a second window. You alt-tab to it, type a question about the game you are playing, press `Enter`. The package captures the current frame of the game window you bound to this session, attaches it to your question as an image, and pi answers it with a vision model — streamed, with per-game conversation memory and automatic context compaction.
 
-### 1.2 New capability (v1.1 → v1.2)
+```
+  Elden Ring (1920x1080)          pi (terminal)
+  ┌───────────────────┐            ┌──────────────────────────────┐
+  │                   │  alt-tab   │ > what am I supposed to do    │
+  │   [the fight]     │ ────────▶  │   here?                      │
+  │                   │            │                              │
+  └───────────────────┘            │ [FRAME #014 · eldenring.exe]  │
+                                   │ Bound to game: eldenring.exe  │
+                                   │                              │
+                                   │ Bind the window once with      │
+                                   │   /gs play                    │
+                                   └──────────────────────────────┘
+```
 
-| ID | Requirement |
-| --- | --- |
-| C16 | **Per-game conversations.** Each game process gets its own isolated conversation, keyed by the game executable. Opening Elden Ring shows the Elden Ring conversation; opening Cyberpunk shows a different one. Context never bleeds across games. (§6.8) |
-| C17 | **Resume where you left off.** Conversations persist across Sidekick restarts *and* game restarts. Reopening a game restores its full transcript and its model context. (§6.8.4) |
-| C18 | **Context management & compaction.** When a conversation grows, older turns are compacted into a rolling *session digest* while recent turns stay verbatim, so continuity survives indefinitely without latency or context-window blowup. Pi-agent-style. (§6.9) |
-| C19 | **REPL command surface.** Slash commands (`/help`, `/new`, `/compact`, `/summary`, `/pin`, `/sessions`, `/usage`, `/model`, `/export`, `/forget`) to drive sessions and context from the prompt line, pi-style. (§6.10) |
-| C20 | **Transcript vs. context separation.** The player's scrollback is never destroyed by compaction; only the *model context* is compacted. Compaction is atomic, versioned, and crash-safe. (§6.9.2) |
-
-### 1.3 Corrections carried forward from v1.0 (see v1.1 §1 for the original list)
-
-| ID | v1.0 said | v1.1/v1.2 says | Why |
-| --- | --- | --- | --- |
-| C1 | Model allowlist `gpt-4o`, `gpt-4.5`, `gpt-5`, default `gpt-4o` | GPT-6 family (`gpt-6-luna` cheapest → `gpt-6.1-sol` → `gpt-6-astra` premium); default `gpt-6-luna` | v1.0's list was stale; **Luna is 100× cheaper than Astra** on both input and output |
-| C2 | Filter on "OpenAI metadata" tags | Allowlist + denylist regex, two-tier | `/v1/models` returns only `id`/`created`/`object`/`owned_by` — **no capability metadata exists** |
-| C3 | Capture crate undecided (`xcap` or `windows-capture`) | **Two engines:** WGC primary (windowed/borderless), DXGI Desktop Duplication fallback (exclusive fullscreen) | WGC returns black frames on exclusive fullscreen; DDA covers it but has its own edge cases |
-| C4 | Overlay over game (implied always) | Explicit compatibility matrix — exclusive fullscreen is **capture-only** | Exclusive fullscreen bypasses the compositor; no always-on-top window can be drawn over it |
-| C5 | Overlay must not appear in its own screenshot | Capture the game **HWND** (overlay excluded by construction); hide-and-restore only on the DXGI path | Display-level capture would capture the overlay |
-| C6 | "Idle CPU 0.0%" | ≤ 0.1 % average over 60 s | 0.0 % is untestable at Task Manager's 1-decimal rounding |
-| C7 | Credential Manager **or** encrypted store | `keyring` → Windows Credential Manager, DPAPI fallback | Stronghold requires the user to hold a separate password file |
-| C8 | Not addressed | §9 anti-cheat & competitive-integrity policy | Largest unmitigated risk in v1.0; now a conscious product constraint |
-| C9 | Not addressed | Error matrix (§7), IPC contract (§15.2), threading (§15.4), tests (§11), milestones (§13) | v1.0 described only the happy path |
-| C10 | Retain last 3–5 exchanges | Superseded by **C16–C20**: continuous per-game context with compaction. `context_budget_tokens` (default 12,000) replaces the turn-count window | A fixed turn window either loses continuity or grows unbounded |
+Everything the hard part of the agent needs — image attachment, streaming, sessions, compaction, token accounting, slash commands, model selection — **already exists in pi**. Gamer Sidekick supplies only what pi does not have: *knowing which window is the game, grabbing its pixels, and injecting the frame at exactly the right moment.*
 
 ---
 
-## 2. Executive Summary & Product Vision
+## 2. Why a pi package (and what was abandoned)
 
-**Sidekick** is a low-latency, low-footprint in-game companion overlay for PC gamers. Built on Rust + Tauri v2, it avoids Electron's memory profile and — critically — does not inject into, hook, or read the target process.
+The previous PRD specified a standalone Rust + Tauri v2 desktop application. Full reasoning in [`PRD-standalone-tauri.md`](./PRD-standalone-tauri.md); the short version:
 
-When summoned via a global hotkey, Sidekick presents a terminal/REPL-style chat surface over the running game. On every submitted prompt, Sidekick captures the current frame of the active game window, pairs it with the player's question, and streams the answer directly onto the game screen.
-
-Sidekick behaves like a **persistent coding agent attached to a game**: each game has its own conversation, conversations survive restarts, and the model's context is compacted automatically so the companion never forgets what it told you twenty minutes ago — while staying fast and cheap enough to use mid-boss-fight.
-
-**Design pillars**
-
-1. **Zero interference.** No DLL injection, no hooks, no input automation, no memory reads. An ordinary always-on-top window — the same category of software as a voice chat app.
-2. **Instant.** Hotkey → visible overlay < 100 ms. Enter → request dispatched < 80 ms.
-3. **Continuous.** Per-game conversations that resume exactly where they left off, with automatic context compaction so memory is unbounded but latency is not.
-4. **Private.** Frames exist only in RAM and only long enough to be transmitted. Conversations are text-only on disk, and every API request opts out of server-side retention (`store: false`).
-5. **Honest.** Streaming from the first token, abortable at any time, with token counts and real price shown after every answer.
-
----
-
-## 3. Goals, Non-Goals, Success Metrics
-
-### 3.1 Goals (pilot)
-
-| ID | Goal |
-| --- | --- |
-| G1 | A player goes from install to an AI-answered in-game question in under 3 minutes |
-| G2 | The overlay is imperceptible: < 45 MB idle RAM, zero measurable FPS or input-latency impact |
-| G3 | Frames are grounded correctly at ≤ 1.5 s to first token (p50, broadband) |
-| G4 | Full support for windowed and borderless-fullscreen games across the test matrix (§11.4) |
-| G5 | **Continuity:** every game has its own persistent conversation that resumes on relaunch, and survives unbounded length through compaction without losing pinned or recent context |
-
-### 3.2 Non-goals for the pilot (explicitly out of scope)
-
-- Cross-platform (macOS/Linux) — Windows only
-- **Competitive / online multiplayer titles** (§9) — this is a product boundary, not a technical limitation
-- Voice input/output, screen recording, video streaming
-- Input automation, macros, aim assist, or any gameplay-affecting feature
-- Cloud sync of conversations (local persistence only; no account, no server)
-- Multiple AI providers (the provider seam exists, but only OpenAI ships)
-- Game-specific integrations, game-state APIs, or telemetry scraping
-
-### 3.3 Success metrics (pilot exit)
-
-| Metric | Target |
-| --- | --- |
-| Setup completion (install → first successful answer) | ≥ 80 % of pilot testers |
-| Capture success rate across the test matrix | ≥ 95 % of attempts |
-| Median first-token latency | ≤ 1.5 s |
-| Hotkey → overlay visible (p95) | ≤ 100 ms |
-| Overlay-attributable FPS delta on test games | 0 |
-| Crash-free sessions | ≥ 99 % |
-| **Session resume correctness** (transcript + context restored exactly) | 100 % across the §11.3 matrix |
-| **Compaction correctness** (no pinned/recent turn ever lost; transcript never truncated) | 100 % |
-| **Compaction overhead** (added latency on the turn that triggers it) | ≤ 1.5 s |
-| Distinct testers using it ≥ 3× in a week | ≥ 50 % — the honest test of usefulness |
-
----
-
-## 4. Personas & Scenarios
-
-| Persona | Need | Representative prompt |
+| Concern | Standalone app would build | pi already provides |
 | --- | --- | --- |
-| **Boss-rush player** | "What am I missing in this fight?" | `what's hitting me from off screen` |
-| **Build optimizer** | "Is this better than what I built?" | `read my stats panel, is this rotation right` |
-| **Explorer** | "Where did I just go?" | `where do i go from here` |
-| **Learner** | "Explain this mechanic without pausing" | `explain the parry timing window shown here` |
-| **Returning player** | "Remind me what we decided 40 minutes ago" | `what did we figure out about this boss` |
+| Image attachment to a prompt | Manual base64 + `ImageContent` construction | `ImageContent` on `prompt`/`sendUserMessage`, `before_agent_start.images` |
+| Token streaming to the UI | Own SSE client + event emitter | `message_update` → `assistantMessageEvent.type === "text_delta"` |
+| Conversation persistence | Own JSONL schema, branching, resume | Session tree, `--session`, `/resume`, `newSession`/`fork`/`switchSession` |
+| **Context compaction** | Own digest algorithm, thresholds, retry, atomic commit | Automatic + manual compaction, compaction events, transcript never mutated |
+| Model list + filter | Own regex allowlist/denylist + pricing table | `get_available_models`, `set_model`, `Usage.cost` per request |
+| Slash commands | Own parser + dispatch | `pi.registerCommand()` |
+| Request lifecycle hooks | n/a | `before_agent_start`, `context`, `tool_call`, `turn_end`, … |
 
-The last persona is what the session system (§6.8–6.9) exists for: continuity across a play session, without ever alt-tabbing or pausing.
+**What pi genuinely cannot do**, and therefore remains in scope for Gamer Sidekick:
 
----
+1. **Know which window is the game.** Pi has no Win32 window enumeration.
+2. **Capture pixels.** Pi has no screen capture.
+3. **Be triggered without focus.** `pi.registerShortcut()` is a *TUI keybinding* — it only fires when the pi terminal itself has keyboard focus. In RPC mode `onTerminalInput()` is a documented no-op. A hotkey that fires while a game is focused is impossible from inside pi's process.
 
-## 5. User Flow & State Model
-
-```
-Launch sidekick.exe
-  │
-  ├─ single-instance check ──(already running)──▶ focus existing instance, exit
-  │
-  ├─ config present & valid? ──no──▶ Config Wizard (§6.1) ──Save──┐
-  └─yes──────────────────────────────────────────────────────────┤
-                                                                 ▼
-                                        ┌───────────────────────────────────────┐
-                                        │ TRAY RESIDENT (no window)             │
-                                        │  Toggle Overlay / Settings /          │
-                                        │  Reset Session / About / Quit         │
-                                        └───────────────────────────────────────┘
-                                          │ global hotkey
-                                          ▼
-                            probe foreground window ──► resolve game key (e.g. eldenring.exe)
-                                          │                    │
-                            no game / own window                 ▼
-                            → tray notification        ┌──────────────────────────────┐
-                                                     │ LOAD OR CREATE SESSION        │
-                                                     │  transcript + digest + budget │
-                                                     └──────────────────────────────┘
-                                                                  │ overlay shown
-                                                                  ▼
-                                        ┌────────────────────────────────────────────┐
-                                        │ OVERLAY  [SIDEKICK // eldenring.exe //    │
-                                        │            24 turns // resumed]           │
-                                        │  transcript (full history, scrollback)    │
-                                        │  λ prompt bar                            │
-                                        └────────────────────────────────────────────┘
-                     Enter │                                    │ Esc / hotkey / tray-toggle
-                          ▼                                     ▼
-             ┌────────────────────────────┐          ┌──────────────────────┐
-             │ BUSY                       │          │ hide + return focus  │
-             │ capture → stream           │─────────▶│ to game; abort stream│
-             │ on threshold: compact      │          └──────────────────────┘
-             └────────────────────────────┘
-```
-
-**Invariants**
-
-- Rust is the single source of truth for sessions, config, and streaming state. The webview renders it and never owns it.
-- **One session per game process.** The active session is a function of the foreground process; switching games switches the whole conversation.
-- **Transcript ≠ context.** The transcript is the complete, persisted, scrollable history. The context is the compacted subset sent to the model. Compaction never deletes the transcript (§6.9.2).
-- Exactly one in-flight request at a time. A second `Enter` while busy is ignored (the keystroke stays in the buffer).
-- Hiding the overlay aborts any in-flight stream and marks the partial answer `⏹ cancelled`.
-- The game keeps rendering at full speed in every state; Sidekick never blocks the game process.
-- Every session write is atomic. A crash mid-write leaves either the old valid file or the new valid file, never a corrupt one.
+Those three are the entire product surface.
 
 ---
 
-## 6. Functional Specification
+## 3. Product Vision
 
-### 6.1 First-Run Onboarding & Configuration
+A companion that has **memory of your playthrough**. It is not a chatbot you re-explain your build to; it is a coach that has been sitting in the corner of your screen all evening, remembers what you tried ten minutes ago, and knows what the boss is doing right now.
 
-On boot, Rust resolves `%APPDATA%\sidekick\` and checks `config.json`. If absent, unparsable, or failing validation, the **Config Wizard** opens as the primary window; the tray icon is **not** created until setup completes (AC-01).
+Three properties make it feel like that, in priority order:
 
-| Property | Control | Validation | Default |
-| --- | --- | --- | --- |
-| Window opacity | Slider 20–100 % | CSS canvas opacity + OS acrylic/mica backdrop | 85 % |
-| Window size W / H | Sliders 380–650 px / 450–800 px | Clamped; re-validated on DPI change | 480 × 620 px |
-| Overlay anchor | Select: top-left / top-right / bottom-left / bottom-right / center | — | top-right |
-| AI provider | Select, disabled (`OpenAI — pilot`) | Locked | OpenAI |
-| API key | Masked input + **Test connection** | Live `GET https://api.openai.com/v1/models`; 401 → inline error, model select stays disabled | empty |
-| Model | Searchable, cost-sorted select (§6.7) | Populated after key validates | `gpt-6-luna` |
-| Image detail | Select `auto` / `low` / `high` | `low` recommended at ≥ 1080p | `auto` |
-| **Context budget** | Slider 2,000–200,000 tokens | Soft compaction threshold (§6.9.3) | **12,000** |
-| **Compaction model** | Select, cheapest-first | Must differ from nothing; may equal the chat model | cheapest available |
-| **Keep recent images** | Number 0–3 | How many past turns keep their frame attached | 1 |
-| Prompt history depth | Number 10–100 | ↑/↓ recall length, per session | 20 |
-| Global hotkey | Key recorder | `RegisterHotKey` must succeed; conflict → inline "in use by another app" | `Alt+Space` |
-| Start on login | Toggle | Optional | off |
-| Competitive-title action | Select `warn` / `block` | Per §9 | `warn` |
-| Encrypt transcripts at rest | Toggle | DPAPI; see §8 | off |
-| **Integrity notice** | Required checkbox | §9 text, rewritten for the offline/PvE scope | — |
+1. **The frame is always current.** The screenshot is taken at the instant you press `Enter` — the exact frame you were looking at when the question formed. This is the whole product.
+2. **The conversation is per game.** Elden Ring's thread is not Cyberpunk's thread. Reopen the game, reopen its thread, pick up mid-fight.
+3. **It never forgets, and never bloats.** Old turns compact away invisibly; your scrollback transcript is never rewritten.
 
-**Wizard behavior**
+---
 
-- Per-field validation on change; **Save** disabled until all required fields pass.
-- **Save** order: write API key to Credential Manager → write `config.json` → register hotkey → create tray → hide wizard. If hotkey registration fails, the wizard stays open with that field highlighted; the config is still saved so only the key must be re-picked.
-- Reopening **Settings** shows current values with the key rendered as `sk-…••••` and a **Replace / Keep** choice. The raw key is never sent to the webview.
-- A **Reset all data** action (clears config, credentials, and every stored session) lives in Settings behind a typed confirmation.
+## 4. Goals and Non-Goals
 
-### 6.2 System Tray & Process Lifecycle
+### 4.1 Goals (v0.1.0)
 
-| Item | Spec |
-| --- | --- |
-| Tray creation | After successful setup only (AC-01); tooltip reflects state: `Sidekick — idle` / `— eldenring.exe` / `— thinking` |
-| Menu 1 | **Toggle Sidekick Overlay** — disabled with a reason when no eligible game window is focused |
-| Menu 2 | **Settings** |
-| Menu 3 | **Reset Session** — clears the *current game's* conversation (§6.8.5) |
-| Menu 4 | **Sessions…** — lists stored game conversations, shows turn count + last active, allows switch/rename/delete/export |
-| Menu 5 | **About** — version, GPU, idle RSS, log folder, copy-diagnostics |
-| Menu 6 | **Quit Sidekick** |
-| Single instance | `tauri-plugin-single-instance`; a second launch focuses the running instance |
-| Idle footprint | ≤ 45 MB RSS; ≤ 0.1 % average CPU over 60 s; no capture timers, no network sockets, no polling while idle |
-| Suspend/resume | On `WM_POWERBROADCAST` suspend → abort in-flight work, drop cached DDA handles and session caches; on resume → re-acquire lazily on next capture |
-| Crash recovery | Next launch detects a dirty-shutdown marker and offers "restore last session / start clean" |
-
-### 6.3 Hotkeys & Keys
-
-| Binding | Scope | Behavior |
+| ID | Goal | Measured by |
 | --- | --- | --- |
-| Global hotkey (default `Alt+Space`) | Global | Toggle overlay |
-| `Escape` | Overlay | Abort if streaming; else hide overlay + return focus to the game |
-| `Ctrl+L` | Overlay | Clear the **visible transcript** only (context and disk history are untouched) |
-| `Ctrl+Shift+L` | Overlay | Reset the **current game's session** entirely (§6.8.5) |
-| `Ctrl+P` | Overlay | Toggle click-through `[PEEK]` mode (§6.5) |
-| `Ctrl+U` | Overlay | Show the usage panel (§6.6.4) |
-| `↑` / `↓` | Overlay | Prompt history (per session, persisted) |
-| `Enter` | Overlay | Submit prompt |
-| `Shift+Enter` | Overlay | Newline |
+| G1 | Ask a question about the game currently on screen and get a vision-grounded answer | AC-GS-01 |
+| G2 | The attached frame is the frame you were looking at when you pressed `Enter` | AC-GS-02 |
+| G3 | Each game process has its own persistent conversation that survives restarts | AC-GS-03 |
+| G4 | Frame bytes never touch disk | AC-GS-04 |
+| G5 | Zero configuration beyond `pi install` + `/gs play` | AC-GS-05 |
+| G6 | Attach cost is bounded and visible | AC-GS-06 |
+| G7 | The package adds no meaningful idle CPU or memory to pi | AC-GS-07 |
 
-**Conflicts to handle:** `Alt+Space` is claimed by some IME/language tooling and legacy apps. Registration failure is a first-class inline state, not an error dialog. Warn when the combination contains `Space`, `Alt`, or a bare `F1`–`F12`.
+### 4.2 Non-Goals (v0.1.0)
 
-**Focus-return caveat:** `SetForegroundWindow` is subject to foreground-lock rules. The implementation uses the `AttachThreadInput` + `SetForegroundWindow` pattern. This is a known-flaky Win32 area and gets dedicated manual coverage (§11.3).
+Explicitly **not** built. Anything here needs a new PRD.
 
-### 6.4 Game Detection & Native Capture
+- ❌ **Overlay window.** No floating window over the game. You alt-tab to pi. (This is the single biggest scope reduction from the deprecated PRD — see §11 R-1.)
+- ❌ **System tray, autostart, installer, `sidekick.exe`.** You run pi. That is the app.
+- ❌ **Global hotkey.** Unreachable from inside a pi package (§2, item 3).
+- ❌ **Rust, Tauri, WebView, React.** The UI is pi's TUI.
+- ❌ **Voice, audio, or game memory reading.** No `ReadProcessMemory`, no DLL injection, no hooks, no input automation. The package sees **pixels and window titles only**.
+- ❌ **Macro/coaching automation.** No click automation, no build orders, no pixel-reading stat trackers.
+- ❌ **Multiplayer / competitive titles.** (§9)
+- ❌ **macOS / Linux support.** Windows-only in v0.1.0; the code must not crash elsewhere (§6.1.4).
 
-**6.4.1 Foreground probe** (`GetForegroundWindow` → `GetWindowThreadProcessId` → `QueryFullProcessImageNameW`)
+---
 
-- Resolve the owning process name (`eldenring.exe`), full image path, and window title.
-- Reject: Sidekick's own windows, shell/desktop processes, any window with a zero client area, and any process on the advisory competitive list when `competitive_title_action = block`.
-- Cache the probe for 2 s — the hotkey path must not pay full probe cost on every press.
-
-**6.4.2 Two capture engines**
-
-| Engine | Crate/API | Selected when | Why |
-| --- | --- | --- | --- |
-| **WGC (primary)** | `windows-capture` 2.x | Windowed or borderless fullscreen | Captures the game **HWND** directly → overlay excluded by construction, no flicker, fastest |
-| **DXGI Desktop Duplication (fallback)** | `windows` crate DDA (`DuplicateOutput` / `AcquireNextFrame` / `MapOutputStream`) | Exclusive fullscreen, or WGC yields black/empty | Covers exclusive fullscreen, which WGC cannot. Display-level, so the overlay must be hidden for the capture and restored immediately after |
-
-DDA handles (device + output + duplication object) are **created once and cached** — per-capture creation costs tens of ms and would break the latency budget.
-
-**6.4.3 Pipeline & budget**
+## 5. User Flow
 
 ```
-Enter pressed
-  → probe foreground window (cached, ≤ 5 ms)
-  → select engine (WGC preferred)
-  → acquire frame                       ┐
-  → crop to client area (drop chrome)   │
-  → downscale if > 1920×1080           ├─ total < 40 ms
-  → encode JPEG q85                     │
-  → base64 data URI                     ┘
-  → build Responses payload, dispatch   (< 80 ms from Enter)
+   pi install npm:pi-gamer-sidekick
+              |
+              v
+   +------------------------------------------+
+   | First prompt in a pi session             |
+   | Gamer Sidekick detects: no bound game    |
+   | -> inline notice + /gs play hint         |
+   +------------------------------------------+
+              |
+              v
+   +------------------------------------------+
+   | /gs play                                  |
+   | -> lists open windows (exe, title, bounds)|
+   | -> user picks "eldenring.exe - ELDEN     |
+   |    RING"                                  |
+   | -> window bound to this session          |
+   | -> named session created:                 |
+   |      gamer-sidekick/eldenring-<hash>     |
+   +------------------------------------------+
+              |
+              v
+   +------------------------------------------+
+   | Gameplay. User alt-tabs to pi.           |
+   |                                          |
+   | > what's it doing in phase 2?            |
+   |   [FRAME #014 · eldenring.exe 1920x1080]  |
+   |   (attached silently, question answered)  |
+   |                                          |
+   | > *answers*                              |
+   |                                          |
+   | > what about if I dodge left?            |
+   |   [FRAME #015 · eldenring.exe 1920x1080]  |
+   |   ...conversation continues, remembers   |
+   |   phase 2 from two turns ago             |
+   +------------------------------------------+
+              |
+              v
+   +------------------------------------------+
+   | /gs pin        -> keep frame #015        |
+   | /gs frames     -> what has been captured |
+   | /gs status     -> window, model, context |
+   | /gs play <n>   -> rebind to another game |
+   | /gs unbind     -> stop capturing         |
+   +------------------------------------------+
 ```
 
-- Encoding runs on the capture worker (`spawn_blocking`); the webview never blocks.
-- One `FrameBuffer` value, owned explicitly, dropped as soon as the HTTP body is built. No clones, no disk, no cache, no clipboard.
-- **Black-frame detection:** sample mean luminance; if ≥ 98 % near-black and the scene is not genuinely black, retry once with the other engine, then surface an explicit error (§7.3).
-- The capture worker is **serialized** (queue depth 1): a rapid double-`Enter` must not spawn two captures.
+**Invariant INV-1:** capturing never blocks, delays, or degrades the user's game. Capture happens only after `Enter`, on the pi thread, never on the game's thread.
 
-**6.4.4 Compatibility matrix**
+**Invariant INV-2:** Gamer Sidekick never writes frame pixels to any file, anywhere, ever.
 
-| Game mode | Overlay visible | Engine | Result |
-| --- | --- | --- | --- |
-| Windowed | Yes | WGC | Full support |
-| Borderless fullscreen | Yes | WGC | Full support (primary target) |
-| Exclusive fullscreen | **No** (compositor bypassed) | DXGI | Degraded: capture + answer, overlay shown once the game returns to a composited mode; the UI says so explicitly rather than appearing broken |
-| Minimised / other desktop / UAC prompt | No | — | Hotkey is a no-op + tray notification |
-| HDR display | Yes | Either | Capture may be tone-mapped darker; acceptable, documented |
+**Invariant INV-3:** Gamer Sidekick is inert until a game window is bound. It never captures your screen because it felt like it.
 
-### 6.5 Pi-Style REPL Overlay
+---
 
-**Aesthetic** — monospace (`JetBrains Mono`, fallback `Cascadia Mono`/`Consolas`), deep charcoal translucent canvas, emerald accent + amber warnings, muted gray secondary text, subtle scanline/blur layers. Opacity from config; must stay legible at 85 % over both bright and dark game content. `prefers-reduced-transparency` and the Windows "transparency effects" accessibility setting force 100 % opaque.
+## 6. Functional Requirements
 
-**Layout**
+### 6.1 Window Binding and Detection
 
-- Frameless draggable header:
-  `▌ SIDEKICK // eldenring.exe // 24 turns // gpt-6-luna // resumed // [INTERACTIVE]`
-  with a status dot: `IDLE` / `CAPTURE` / `STREAM` / `COMPACT` / `ERROR`.
-- Scrollback transcript, auto-scrolled, pinned to the bottom unless the player scrolled up (then a "jump to latest" affordance appears).
-- Bottom prompt bar with a fixed `λ ` indicator and blinking caret.
+#### 6.1.1 The core problem
 
-**Message rendering**
+The obvious design — "capture the foreground window when the user hits `Enter`" — **is wrong**, and this PRD deliberately rejects it.
 
-| Element | Behavior |
+To type a question, the user has alt-tabbed to the terminal. At the moment of capture, the foreground window is **Windows Terminal**, not the game. Foreground capture would send a picture of a text editor to a vision model.
+
+Therefore: **the capture target is an explicitly bound window, identified by its Win32 handle, resolved at capture time from a cached window list — never by querying the foreground window at prompt time.**
+
+#### 6.1.2 Binding
+
+| Aspect | Requirement |
 | --- | --- |
-| User message | `λ <text>` in accent colour, timestamped `HH:MM:SS` |
-| Frame badge | Inline `[FRAME #014 · 1920×1080 · JPEG 84 KB · wgc]`. Clicking expands a thumbnail **for the current overlay session only** (memory-backed object URL, revoked on hide/reset). Nothing is written to disk. |
-| Assistant message | Markdown streamed token-by-token: headings, lists, tables, inline code, fenced blocks with a copy button |
-| Reasoning tokens | **Never rendered.** Counted for cost, discarded |
-| Compaction notice | `[context compacted · 24 → 6 turns · digest v3 · −18 turns]` — an honest, dismissible status line |
-| Usage footer | `1.2 s · 1.1k in / 340 out · est $0.00042` (§6.6.4) |
-| Errors | Inline `!!` block with the exact message, `AppError.code`, and a **Retry** action that re-sends with a fresh capture |
-| Pinned turns | Marked `📌 PINNED` in the transcript; exempt from compaction (§6.9.4) |
+| Command | `/gs play` with no argument opens a window picker |
+| Picker source | `openWindows()` from `active-win@9.0.0` — full window list with `title`, `id` (HWND), `bounds`, `owner.name`, `owner.path`, `owner.processId` |
+| Picker UI | `ctx.ui.select()` with a filtered list, e.g. `[eldenring.exe] ELDEN RING  1920x1080 @ (0,0)` |
+| Filtering | Exclude zero-size windows, the terminal running pi itself, and the desktop shell. Sort: exact executable-name matches first, then largest area |
+| Direct bind | `/gs play eldenring` binds without the picker when exactly one window matches |
+| Rebind | `/gs play <n>` where `n` is an index from the last picker listing |
+| Unbind | `/gs unbind` clears the binding; the session becomes text-only |
+| Bound state | Persisted in the session as a `gamer_sidekick_binding` custom entry (`pi.appendEntry`), so a resumed session knows its window |
+| Persistence | The HWND is **session-scoped and not trusted across pi restarts** (handles are recycled by Windows). On `session_start`, a bound handle is validated against the live window list; if it no longer exists, the binding is marked stale and the user is told to run `/gs play` |
+| Display resolution | At bind time, resolve which display contains the window's centre point and cache the display index (see §6.2.3) |
 
-**Overlay window behaviour**
+#### 6.1.3 Game identity and per-game naming
 
-- `alwaysOnTop: true`, `decorations: false`, `transparent: true`, `skipTaskbar: true`.
-- **Click-through** is a **whole-window mode**, not per-pixel: `INTERACTIVE` (input captured) ⇄ `PEEK` (`Window::set_ignore_cursor_events(true)` — clicks pass to the game while the overlay stays visible). Pixel-accurate click-through is not available in Tauri v2 (open upstream feature request). Mode is shown in the header and toggled with `Ctrl+P`.
-- Positioned per the configured anchor with a 24 px margin; re-anchored when the game window moves or the display/DPI changes.
-- Shown with `show()` + `set_focus()`; hidden with `hide()`.
+| Aspect | Requirement |
+| --- | --- |
+| Identity key | Lowercased executable basename, e.g. `eldenring.exe` |
+| Collision handling | Two installs of the same exe must not share a session. Session slug = `<sanitised-exe>-<8-char hash of owner.path>` |
+| Slug sanitisation | `[a-z0-9._-]`, truncated to 40 chars |
+| Session name | `gamer-sidekick/<slug>`, applied via `pi.setSessionName()` |
+| Collision case | A window bound to a game whose slug differs from the current session's slug → §6.5 session-switch flow |
 
-### 6.6 OpenAI Pipeline (Responses API)
+#### 6.1.4 Platform guard
 
-**6.6.1 Request shape**
+On non-Windows, or when the native module fails to load, Gamer Sidekick **disables itself cleanly**: no commands registered that depend on capture, one `ctx.ui.notify` at load time, and a status line reading `[sidekick: unavailable on this platform]`. It must never throw during extension load.
+
+#### 6.1.5 Foreground-window escape hatch
+
+`/gs follow` opts into foreground-target behaviour for users who bind pi *over* the game (picture-in-picture pi, or a second display where the game keeps focus). When `follow` is on, the target is re-resolved from `activeWindow()` at each capture, excluding the terminal running pi. Default **off**. Documented as experimental.
+
+---
+
+### 6.2 Capture Pipeline
+
+#### 6.2.1 Stages
 
 ```
-POST https://api.openai.com/v1/responses
+  bound HWND + cached bounds
+        |
+        v
+  [1] RESOLVE   re-read window bounds from openWindows() by HWND;
+        |        detect minimized / closed / covered
+        v
+  [2] DISPLAY   pick the display containing the window centre (cached
+        |        from bind time; see 6.2.3)
+        v
+  [3] GRAB      screenshot-desktop -> full-display JPEG buffer
+        |
+        v
+  [4] CROP      sharp .extract({left, top, width, height})
+        |        using window bounds in display-local coordinates
+        v
+  [5] SCALE     .resize({ width: 1280, withoutEnlargement: true })
+        |        (never upscale; a 720p game stays 720p)
+        v
+  [6] ENCODE    .jpeg({ quality: 80 })  ->  Buffer
+        |
+        v
+  [7] ATTACH    ImageContent { type:"image", data: base64, mimeType:"image/jpeg" }
+```
+
+#### 6.2.2 Parameters
+
+| Parameter | Value | Rationale |
+| --- | --- | --- |
+| Long edge | 1280 px, `withoutEnlargement` | Keeps image tokens bounded; above this the marginal read accuracy does not pay for the cost |
+| JPEG quality | 80 | HUD text stays legible; dark scenes do not band badly |
+| Format | JPEG | PNG at 1920x1080 is ~3 MB base64 vs ~250 KB |
+| Window crop | Exact window bounds | Sends the game, not the desktop, the taskbar, or a chat app |
+
+#### 6.2.3 Multi-monitor
+
+`screenshot-desktop.listDisplays()` returns `{id, name}` **without bounds**, so it cannot by itself tell which display a window is on. Resolution:
+
+1. At bind time, enumerate display bounds once (`[System.Windows.Forms.Screen]::AllScreens` through PowerShell, one invocation, result cached in memory and in the binding entry).
+2. Store the matching `screen` index for `screenshot({screen})` alongside the window bounds.
+3. If a window migrates to another display at runtime, the cached index is wrong. Detection: the cropped region falls outside the display's real bounds → re-resolve once, then continue. Cap re-resolutions at one per capture to avoid a loop.
+4. Manual override: `/gs display <n>`.
+
+#### 6.2.4 Failure handling
+
+| Condition | Detection | Behaviour |
+| --- | --- | --- |
+| Window closed | HWND absent from `openWindows()` | Mark binding stale, notify once, send the question **without** an image, tell the model the frame was unavailable |
+| Window minimized | `bounds.width === 0 \|\| bounds.height === 0` | Same as above; message names the reason |
+| Capture returns black frame | Mean luminance of the crop below threshold | Retry once; if still black, warn (`capture returned a black frame — the game may be using exclusive fullscreen`) and attach nothing |
+| Native module missing | `import()` throws at load | §6.1.4 clean disable |
+| Crop fails (window partially off-screen) | `sharp.extract` throws | Clamp the rect to display bounds and retry once |
+
+**Design rule:** a capture failure **never fails the user's question**. The prompt is always delivered; only the image is omitted, and the omission is stated explicitly to the model so it does not hallucinate having seen a frame.
+
+---
+
+### 6.3 Frame Attachment — the core mechanism
+
+#### 6.3.1 When the frame is taken
+
+`before_agent_start` — fired after the user submits a prompt, before the agent loop, carrying `event.prompt: string` and `event.images?: ImageContent[]`.
+
+| Rule | Detail |
+| --- | --- |
+| Trigger | Every **user-submitted** prompt. Not on `steer` or `followUp` messages (a mid-turn steering message must not silently swap the frame — the user is looking at a *different* moment than the one they asked about) |
+| Ordering | Capture is awaited before the handler returns, so the frame is in hand before the model request is built |
+| Cost control | If the bound model does not accept image input, skip capture entirely and tell the user why (`/gs models` lists which are vision-capable) |
+
+#### 6.3.2 How the frame reaches the model — and why it is *not* the obvious way
+
+`BeforeAgentStartEventResult` accepts `message?: Pick<CustomMessage, "customType" | "content" | "display" | "details">`, and `CustomMessage.content` accepts `ImageContent[]`. So attaching the image to the user message *is* possible. **It is also wrong**, because pi persists user messages into the session file — which would write ~330 KB of base64 per turn to disk, violating INV-2 and bloating every session file on the machine.
+
+Instead, the frame is injected at the **`context`** event:
+
+| Step | API | Persisted? |
+| --- | --- | --- |
+| 1. Capture | `before_agent_start` handler → `capture()` → store in an in-memory `pendingFrame` | No — nothing returned from the handler |
+| 2. Record provenance | `pi.appendEntry("gamer_sidekick_frame", { id, exe, bounds, bytes, sha256Prefix, timestamp })` | **Yes — metadata only, no pixels** |
+| 3. Inject | `context` handler → locate the final user message in `event.messages: AgentMessage[]` → return `{ messages }` with the frame spliced in immediately before it | **No — `context` is request-local; pi restores state afterwards** |
+| 4. Tell the model | the injected message is `[TextContent(caption), ImageContent(...)]`, caption = `` `[FRAME #014 · eldenring.exe · 1920x1080 · captured 12:03:11 · this is the current game state]` `` | No |
+
+**Why `context` and not `context_with_system`:** the `context` handler receives conversation messages *without* the system prompt and tool declarations, and pi restores that state afterwards. Gamer Sidekick has no business touching the system prompt, so `context` is the correct and least-invasive hook.
+
+**Result:** full vision capability, zero image bytes on disk, and a transcript that reads `[FRAME #014 · eldenring.exe]` forever after.
+
+#### 6.3.3 Frame budget
+
+A vision model will happily accept fifty 1280px screenshots. The user cannot afford that and does not need it.
+
+| Rule | Value | Rationale |
+| --- | --- | --- |
+| Live frames in context | **1** — the current turn's frame only | One frame is what the question is about |
+| Pinned frames | **3** maximum, LRU-evicted with a visible notice | "Compare this to what I showed you earlier" |
+| Frames before compaction is offered | 2 | Compaction (§6.9) summarises frames away with everything else |
+| Frames in one turn | 1, unless the model calls `game_frame` (§6.6) | |
+
+Approximate cost at `gpt-6-luna`: a 1280px image ≈ 1,100 input tokens ≈ **$0.00011** per frame. Immaterial; the budget is about context coherence, not money.
+
+---
+
+### 6.4 Frame Pinning
+
+| Command | Behaviour |
+| --- | --- |
+| `/gs pin [id]` | Pin the current frame (or frame `id`) so it is re-injected at the head of the conversation on every subsequent turn |
+| `/gs pins` | List pinned frames: id, exe, timestamp, byte size |
+| `/gs unpin [id]` | Drop one pin; `/gs unpin all` drops all |
+| `/gs compare` | Prompt template that instructs the model to compare the pinned frame(s) against the current one |
+
+Pinned frame bytes are held **in memory only**. They are **not** persisted: pins are ephemeral by design and do not survive a pi restart. This is stated in `/gs help`.
+
+---
+
+### 6.5 Per-Game Sessions
+
+#### 6.5.1 The requirement
+
+Each game executable gets its own conversation. Opening Elden Ring and asking a question must not put Elden Ring context into the Cyberpunk thread.
+
+#### 6.5.2 Mechanism
+
+All of this is pi functionality; Gamer Sidekick only calls it.
+
+| Step | API |
+| --- | --- |
+| Name the session | `pi.setSessionName("gamer-sidekick/" + slug)` |
+| Switch to an existing game session | `ctx.switchSession(sessionPath, { withSession })` — available on `ExtensionCommandContext` |
+| Create a fresh game session | `ctx.newSession({ setup })` |
+| Persist the binding | `pi.appendEntry("gamer_sidekick_binding", {...})` inside that session |
+
+#### 6.5.3 Flow
+
+1. `/gs play <exe>` binds the window and computes the slug.
+2. If the current session is already bound to that slug → nothing to do; rename if unnamed.
+3. If a session named `gamer-sidekick/<slug>` already exists → `/gs game` offers to switch to it (carrying the full transcript and model context). Auto-switch is **off** by default (`/gs autoswitch on` to enable) because silently swapping the conversation out from under a user mid-thought is hostile.
+4. If none exists → `ctx.newSession({ setup })`, apply the name, write the binding entry, seed the system-prompt section (§6.7.2).
+
+#### 6.5.4 Commands
+
+| Command | Behaviour |
+| --- | --- |
+| `/gs game` | Show current game, slug, session path, message count, and whether autoswitch is on |
+| `/gs games` | List all `gamer-sidekick/*` sessions with last-used time and message count; `k` to open the picker, `d` to delete |
+| `/gs autoswitch on\|off` | Default `off` |
+
+---
+
+### 6.6 Commands, Tools, and Status
+
+#### 6.6.1 Slash commands (all via `pi.registerCommand`)
+
+| Command | Purpose |
+| --- | --- |
+| `/gs play [exe\|n]` | Bind a game window (§6.1.2) |
+| `/gs unbind` | Stop capturing; session becomes text-only |
+| `/gs follow` | Toggle experimental foreground-target mode (§6.1.5) |
+| `/gs display <n>` | Override the display used for capture (§6.2.3) |
+| `/gs shot` | Capture a frame now, attach it, and ask the model to describe it |
+| `/gs pin [id]` / `/gs pins` / `/gs unpin [id]` | Frame pinning (§6.4) |
+| `/gs frames` | Table of captured frames this session: id, exe, size, bytes, timestamp, pinned? |
+| `/gs game` / `/gs games` / `/gs autoswitch` | Session management (§6.5.4) |
+| `/gs models` | List pi's models, marking which accept image input, cheapest first |
+| `/gs status` | Bound window, display, model, thinking level, context usage, frames this session, estimated image tokens |
+| `/gs setup` | Guided check: native module loads, window list readable, capture produces a non-black frame, selected model accepts images (§6.7.1) |
+| `/gs help` | Command list |
+
+Aliases: `/gamer` and `/sidekick` resolve to `/gs`.
+
+#### 6.6.2 Model-callable tools (all via `pi.registerTool`)
+
+| Tool | Parameters | Behaviour | Notes |
+| --- | --- | --- | --- |
+| `game_frame` | `{ reason?: string }` | Captures a new frame and returns metadata | Image is injected by the `context` handler (§6.3.2); the tool result is text + `details` only, so no pixels reach the transcript |
+| `game_window` | `{}` | Returns bound window: exe, title, bounds, display, whether stale | Read-only |
+
+Both are declared with `annotations: { readOnlyHint: true, openWorldHint: false }` so a permission extension never blocks them (`extensions.md`, tool exposure).
+
+Both are registered `direct` — they are the point of the package and should be visible to the model on every turn. `game_window` is cheap; `game_frame` is **not** model-gated by default, so the tool description must state that each call attaches another image (§6.3.3).
+
+#### 6.6.3 Status line
+
+`ctx.ui.setStatus("gamer-sidekick", statusText)` renders in pi's footer:
+
+```
+[SIDEKICK · eldenring.exe · 1920x1080 · 14 frames · ctx 68%]
+```
+
+Updated on `before_agent_start`, `session_start`, `/gs status`, and session switch. Cleared on unbind and on capture failure.
+
+> **Known limitation:** `setStatus` is documented as a **no-op in RPC mode**. Gamer Sidekick targets TUI mode (§6.8).
+
+---
+
+### 6.7 Model Configuration
+
+#### 6.7.1 What Gamer Sidekick does *not* do
+
+It does **not** manage API keys, define providers, price models, or maintain a model allowlist. Those are pi's job:
+
+| Concern | Owner |
+| --- | --- |
+| API key storage | pi — `OPENAI_API_KEY` or pi's credential store |
+| Provider config | pi — `models.json` / `custom-provider.md` |
+| Model list | pi — `get_available_models()` |
+| Switching model | pi — `/model`, `pi.setModel()` |
+| Token counts and **cost** | pi — `Usage.cost` on every `AssistantMessage`; visible via pi's `/session` |
+| Context usage | pi — footer |
+
+Gamer Sidekick's only additions are the **frame-specific** numbers (§6.8) and a vision-capability check before capturing.
+
+#### 6.7.2 System-prompt contribution
+
+pi's system prompt is built from sections. Gamer Sidekick appends one section, only for sessions bound to a game:
+
+```
+[gamer-sidekick]
+The user is asking about the game bound to this session (<exe>, <title>).
+A screenshot of the current game state is attached to the most recent user message.
+Describe only what is visible in the frame. If the frame is unavailable, say so plainly
+instead of guessing. Be concise and actionable. Prefer concrete numbers, items, and
+positioning over general advice. Do not claim you can see anything not in the frame.
+```
+
+Added via the `before_agent_start` `systemPromptOptions` mutation (not by replacing the whole prompt). Removing the extension removes the section.
+
+---
+
+### 6.8 Frame Accounting
+
+Tracked in memory, displayed by `/gs status` and `/gs frames`:
+
+| Metric | Source |
+| --- | --- |
+| Frames captured / attached / dropped | in-memory counters, reset per session |
+| Bytes per frame | `Buffer.byteLength` before base64 |
+| Estimated image tokens | `ceil(w/750) * ceil(h/750)` tiles × 85 tokens — the standard OpenAI vision tile estimate |
+| Estimated image cost | image tokens × the active model's cached-input rate, from pi's `Usage` |
+
+**No new pricing table is shipped.** pi owns pricing; Gamer Sidekick only multiplies.
+
+---
+
+### 6.9 Context and Compaction
+
+Compaction is pi's. Gamer Sidekick's only additions:
+
+| Requirement | Detail |
+| --- | --- |
+| Transparency | Compaction events (`compaction_start` / `compaction_end`) are surfaced in the status line so the user understands a pause |
+| Frame handling | Because frames live in the `context` transformation, they are **not session entries** and therefore cannot be double-counted by compaction. Pinned frames are re-injected each request (§6.4) and are the only frames that survive indefinitely |
+| Session-bound check | After compaction, the `gamer-sidekick` prompt section must still be present. If it is not, re-apply it on the next turn |
+
+---
+
+## 7. Package Layout and Manifest
+
+```
+pi-gamer-sidekick/
+├── package.json
+├── README.md
+├── LICENSE
+├── extensions/
+│   ├── index.ts              # entry: registers everything
+│   ├── binding.ts            # window binding, picker, identity (§6.1)
+│   ├── capture.ts            # pipeline + failure handling (§6.2)
+│   ├── attach.ts             # before_agent_start + context injection (§6.3)
+│   ├── frames.ts             # pinning, budgets, accounting (§6.4, §6.8)
+│   ├── sessions.ts           # per-game sessions (§6.5)
+│   ├── commands.ts           # /gs command surface (§6.6.1)
+│   ├── tools.ts              # game_frame, game_window (§6.6.2)
+│   └── prompt.ts             # system-prompt section (§6.7.2)
+├── skills/
+│   └── gaming-companion/
+│       └── SKILL.md          # optional: deeper domain guidance the model
+│                             # loads on demand (loot tables, meta builds)
+└── prompts/
+    └── gs-loadout.md         # /prompt template: "review my build"
+```
+
+### `package.json`
+
+```json
 {
-  "model": "gpt-6-luna",
-  "store": false,                                  // opt out of server-side retention
-  "stream": true,
-  "reasoning": { "effort": "none" },                // omitted if the model does not support it
-  "max_output_tokens": 700,
-  "input": [
-    { "role": "system", "content": [ { "type": "input_text", "text": "<system prompt>" } ] },
-    { "role": "user",   "content": [ { "type": "input_text",  "text": "<session digest>" },
-                                     { "type": "input_text",  "text": "<player query>" },
-                                     { "type": "input_image", "image_url": "data:image/jpeg;base64,…",
-                                       "detail": "auto|low|high" } ] }
-  ]
+  "name": "pi-gamer-sidekick",
+  "version": "0.1.0",
+  "description": "A pi package that captures your game window and attaches the frame to your question.",
+  "keywords": ["pi-package"],
+  "type": "module",
+  "pi": {
+    "extensions": ["./extensions/index.ts"],
+    "skills": ["./skills"],
+    "prompts": ["./prompts/*.md"]
+  },
+  "dependencies": {
+    "active-win": "^9.0.0",
+    "screenshot-desktop": "^1.15.6",
+    "sharp": "^0.33.0"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-agent-core": "*",
+    "typebox": "*"
+  },
+  "engines": { "node": ">=20" },
+  "os": ["win32"]
 }
 ```
 
-- `store: false` is **mandatory**: the Responses API otherwise retains responses server-side (≈30 days). Sidekick opts out on every request, including compaction calls. New AC-29.
-- **Explicit history, not `previous_response_id`.** Sidekick sends the full composed `input` array every turn because compaction drops images and prunes turns deterministically, and because `store: false` removes server-side chaining. Decision recorded in §14.
-- `reasoning.effort` is **capability-gated per model** — `gpt-6-luna` supports `none | low | medium | high | xhigh | max`; `gpt-6-astra` supports `low | medium | high | xhigh | max` (no `none`). Never hardcode: read the capability map (§6.7.3) and omit the field when unsupported. Pilot default is `none` on Luna — a player mid-boss cannot afford reasoning latency.
-- `max_output_tokens` is a **latency/verbosity bound, not a spending bound** (§C14). Default 700, configurable 200–4,000.
+**Rules honoured** (`packages.md`): host-provided packages are declared as `peerDependencies` with `"*"` and never bundled; runtime npm deps go in `dependencies` and are installed by pi; `pi-package` keyword makes it gallery-eligible.
 
-**System prompt (fixed)**
+---
 
-> You are Sidekick, an elite real-time gaming strategist. Analyze the provided game screenshot and the player's query. Provide clear, concise, actionable advice. Avoid fluff. Keep answers under 150 words unless the player asks for detail. If the screenshot does not contain enough information to answer, say exactly what is missing — never guess at what you cannot see.
+## 8. Extension API Surface Used
 
-**6.6.2 Streaming**
+Every API this package touches, with its verified signature. Nothing outside this list.
 
-- Rust `reqwest` SSE reader on a Tokio task, one task per `request_id`, emitting `sidekick://stream-token` per delta.
-- Consumed events: `response.output_text.delta` → token; `response.completed` → `sidekick://stream-done` with usage; `response.failed` / `error` → `sidekick://stream-error`. Unknown event types are ignored (forward compatibility).
-- **Reasoning summaries are never requested.** Reasoning tokens are counted for cost, never displayed.
-- The webview re-parses only the streaming tail (`MarkdownStream`); a 2,000-token answer must not degrade the overlay's frame rate.
-- Cancellation aborts the HTTP request immediately and marks the partial answer `⏹ cancelled` — partial output is never silently dropped.
+| API | Signature / shape | Used for |
+| --- | --- | --- |
+| `pi.on("before_agent_start", h)` | `(event: { prompt: string; images?: ImageContent[]; readonly systemPrompt: string; systemPromptOptions: NormalizedBuildSystemPromptOptions }, ctx) => Promise<BeforeAgentStartEventResult \| void>` | §6.3.1 capture trigger; §6.7.2 prompt section |
+| `pi.on("context", h)` | `(event: { type: "context"; messages: AgentMessage[] }, ctx) => Promise<{ messages?: AgentMessage[] } \| void>` | §6.3.2 frame injection — **request-local, not persisted** |
+| `pi.on("session_start", h)` | `(event, ctx) => void` | §6.1.2 binding validation, status line |
+| `pi.on("session_info_changed", h)` | `(event, ctx) => void` | `/gs status` refresh |
+| `pi.on("compaction_start" \| "compaction_end", h)` | session events | §6.9 status surfacing |
+| `pi.registerCommand(name, opts)` | `opts: { description?, handler: (args: string, ctx: ExtensionCommandContext) => Promise<void> }` | §6.6.1 |
+| `pi.registerTool(def)` | `def: { name, description, parameters: TSchema, exposure: "direct", annotations: { readOnlyHint: true }, execute(ctx, args, signal) => { content, details } }` | §6.6.2 |
+| `pi.appendEntry(type, data)` | `(customType: string, data?: unknown) => void` | §6.3.2 provenance metadata; §6.1.2 binding |
+| `pi.setSessionName(name)` | `(name: string) => void` | §6.5.2 |
+| `pi.getSessionName()` | `() => string \| undefined` | §6.5.3 |
+| `pi.getSettings()` | `() => Settings` | reading user preferences |
+| `ctx.switchSession(path, { withSession })` | `ExtensionCommandContext` | §6.5.2 |
+| `ctx.newSession({ setup })` | `ExtensionCommandContext` | §6.5.2 |
+| `ctx.ui.select(options)` | dialog; works in TUI **and** RPC mode | §6.1.2 picker, `/gs games` |
+| `ctx.ui.notify(msg)` | fire-and-forget | failure notices |
+| `ctx.ui.setStatus(key, text)` | fire-and-forget; **no-op in RPC mode** | §6.6.3 |
+| `ctx.mode`, `ctx.hasUI` | `"tui" \| "rpc" \| …`, boolean | mode guards |
 
-**6.6.3 Composed input assembly**
+**Deliberately not used:** `registerShortcut` (TUI keybinding only — cannot fire while a game has focus, §2), `registerProvider`, `registerMcpServer`, `registerVirtualModel`, `setHeader`/`setFooter` (no-ops in RPC mode), `withFileMutationQueue` (no file writes), `message_end` rewriting (would mutate the transcript).
 
-Order is fixed so that the stable prefix (system prompt + digest) stays byte-identical turn to turn, which is what makes provider-side prompt caching possible later:
+---
 
-```
-[system prompt]  ← static
-[session digest] ← changes only on compaction
-[recent window]  ← verbatim turns
-  ├─ pinned turns (any age)
-  ├─ recent turns, with images for the last `keep_recent_images`
-  └─ older turns: text only, or dropped into the digest
-[current query + frame]
-```
+## 9. Product Scope: Non-Competitive Games Only
 
-**6.6.4 Usage & price in the overlay** (owner decision C14 — *display only, no guardrails*)
+Carried forward unchanged from the deprecated PRD — this is a product policy, not an architecture decision, and it survives the pivot.
 
-There are **no spending caps, no monthly ceilings, and no cost-based throttling**. Sidekick uses the player's own key and the player pays their own bill. Sidekick's job is to make the spend legible:
+Gamer Sidekick is for **single-player, offline, and PvE/co-op titles**. It is not for competitive online multiplayer.
 
-- **Per-answer footer:** `1.2 s · 1.1k in / 340 out · est $0.00042` (input/output/reasoning tokens from `response.usage`).
-- **`Ctrl+U` / `/usage` panel:** current session totals, per-game totals, lifetime totals, current model, and the pricing in effect.
-- **Settings → Usage:** lifetime totals and per-session breakdown, exportable as CSV.
-- **Cost formula:** `(input_tokens − cached_tokens) × in_price + cached_tokens × cached_in_price + output_tokens × out_price`, all per-1M-token rates from the pricing table (§6.7.4). Reported when known; shown as `—` when the model's price is unknown, never guessed.
-- `input_tokens_details.cached_tokens` is surfaced as a `cached` hint. Prompt-cache utilisation is a **non-pilot optimisation**, noted because cached input is billed at 10 % of the uncached rate.
+Rationale: real-time advice during competitive play crosses from "assistant" into "cheating", is likely to violate terms of service, and puts the user's account at risk.
 
-### 6.7 Model Discovery, Filtering & Pricing
+| Aspect | Requirement |
+| --- | --- |
+| Advisory list | Ship a small curated list of competitive titles by executable name |
+| Action | `competitive_title_action: "warn" \| "block"`, default **`warn`** |
+| `warn` | Bind normally, show a one-time notice on first bind |
+| `block` | Refuse to bind, explain why, name the config key to change it |
+| Configurable | The list and the action live in the binding entry and are user-editable; no code change required to harden or lift the policy |
 
-**6.7.1 Filter (two tiers)**
+---
 
-`GET /v1/models` returns only `{ id, created, object, owned_by }` — **no capability metadata** — so filtering must be heuristic.
+## 10. Error Matrix
 
-*Tier 1 — allowlist:* `gpt-6*`, `gpt-5*`, `gpt-4.1`, `gpt-4o`, `gpt-4o-mini`
+| # | Condition | User sees | Model sees | Data at risk |
+| --- | --- | --- | --- | --- |
+| E1 | No game bound | `[SIDEKICK · no game bound · /gs play]` in status | Normal text answer | none |
+| E2 | Bound window closed | `[SIDEKICK · eldenring.exe is gone — /gs play]` | "The game window was not available, so I have no current frame." | none |
+| E3 | Window minimized | `[SIDEKICK · eldenring.exe minimized]` | same as E2, reason stated | none |
+| E4 | Black frame | `[SIDEKICK · capture returned black — exclusive fullscreen?]`, retried once | "The frame capture failed; I cannot see the current state." | none |
+| E5 | Native module failed to load | One notify at startup; `/gs *` reports unavailable | package inert | none |
+| E6 | Non-Windows platform | `[SIDEKICK · unavailable on this platform]` | package inert | none |
+| E7 | Selected model rejects images | Capture skipped; `[SIDEKICK · <model> has no image input — /gs models]` | text-only answer | cost saved |
+| E8 | Pin limit reached (3) | `[SIDEKICK · pin #7 evicted (limit 3)]` | oldest pin silently absent | none |
+| E9 | Compaction in progress | `[SIDEKICK · compacting…]` then context % | nothing special | none |
+| E10 | Capture exceeds 3s budget | `[SIDEKICK · slow capture (2.8s)]`, frame still attached | frame attached | none |
 
-*Tier 2 — denylist (applied after the allowlist):*
-```
-*-embedding-*  text-embedding-*  text-embedding-3-*  tts-*  whisper-*
-gpt-4o-audio-*  gpt-4o-realtime-*  gpt-4o-mini-tts  *-realtime  *-live
-dall-e-*  gpt-image-*  gpt-*-transcribe  omni-moderation-*
-*-codex  gpt-*-search  *deep-research  computer-use-preview
-o1*  o3*  o4*
-```
+**Invariant INV-4:** every one of E1–E10 degrades to *a working text-only pi session*. The package never blocks a prompt.
 
-Rules: allowlist first, denylist second; a model must be allowlisted **and** not denylisted. An empty intersection shows an explicit warning with the raw count plus **Show all models**. The list is cached 10 min, refreshed on wizard open or manual refresh, and a fetch failure never blocks configuration.
+---
 
-**6.7.2 Cost-first presentation** (owner decision C13)
+## 11. Risks and Mitigations
 
-The picker is sorted by **blended price ascending** and grouped:
-
-| Group | Models (verified 2026-10-04) | Input / 1M | Output / 1M |
+| ID | Risk | Severity | Mitigation / fallback |
 | --- | --- | --- | --- |
-| **Cheapest** | `gpt-6-luna` *(default; tagged "Default" by OpenAI)* | **$0.10** | **$0.50** |
-| Balanced | `gpt-6.1-sol` | *verify in M4* | *verify in M4* |
-| Premium | `gpt-6-astra` | $10.00 | $50.00 |
-
-Each row shows `$x.xx · $y.yy  in·out` so price is visible at selection time. Default selection is the cheapest available allowlisted model, falling back through the sorted list. `gpt-6-luna` is also the default **compaction** model — summarisation does not need a premium model.
-
-**6.7.3 Capability map**
-
-A static, unit-tested map of per-model-family capabilities: vision in, streaming, `reasoning.effort` values accepted, context window, max output. Default context window used for budgeting: **1,050,000 tokens** (Luna and Astra). Unknown models fall back to conservative defaults and omit optional fields rather than sending unsupported ones.
-
-**6.7.4 Pricing table & rate modifiers**
-
-Built-in table, **verified against `developers.openai.com/api/docs/pricing` on 2026-10-04**:
-
-| Model | Input | Cached input | Cache writes | Output |
-| --- | --- | --- | --- | --- |
-| `gpt-6-luna` | $0.10 | $0.01 | $0.125 | $0.50 |
-| `gpt-6-astra` | $10.00 | $1.00 | $12.50 | $50.00 |
-| `gpt-6.1-sol` | *unverified — must be filled during M4* | | | |
-
-Rate modifiers documented so cost arithmetic is explainable: cached input bills at 10 % of the uncached input rate; cache writes bill at 1.25×; prompts over 272 K input tokens bill at 2× input / 1.5× output; Batch and Flex bill at 50 %; Fast mode at 2×; regional processing adds 10 %. **Sidekick uses none of Batch/Flex/Fast in the pilot** (all add latency that defeats the product).
-
-The table ships in `config.json` as `pricing` and is user-overridable in Settings, so a price change never requires a release. Unknown models display tokens with `—` cost.
-
-**6.7.5 Escape hatch** — the filter exists to stop players picking a text-only or embedding model, not to lock them out. `Show all models` plus manual model-ID entry is always available; a stale filter can never hard-block a paying user.
-
-### 6.8 Per-Game Sessions & Resume
-
-**6.8.1 Session identity**
-
-A session is keyed by the game process:
-
-```
-key   = lowercase process name            e.g. "eldenring.exe"
-slug  = sanitised key + short exe-path hash e.g. "eldenring.exe-a1b2c3"
-```
-
-The path hash disambiguates two different executables that share a filename (common for generic names like `game.exe`). The pair `(key, exe_path_hash)` is the identity; the slug is only the filename.
-
-**6.8.2 Isolation rules**
-
-- At most one session is *active* at a time; the active session is derived from the foreground process on every hotkey press.
-- Switching games swaps the entire conversation and the entire model context. Context never mixes.
-- No cross-game retrieval, search, or shared digest. Ever.
-- Opening a game with no prior session creates one lazily on the first submitted prompt (never on hotkey press, so browsing games costs nothing).
-
-**6.8.3 On-disk format**
-
-```
-%APPDATA%\sidekick\sessions\<slug>.json
-```
-
-```jsonc
-{
-  "schema_version": 1,
-  "key": "eldenring.exe",
-  "exe_path_hash": "a1b2c3",
-  "title": "Margit — second attempt",
-  "created_at": "2026-10-04T19:02:11Z",
-  "updated_at": "2026-10-04T20:41:55Z",
-  "model": "gpt-6-luna",
-  "digest": { "text": "Player is fighting Margit…", "version": 3, "updated_at": "…", "source_turn_count": 24 },
-  "turns": [
-    { "id": "t_0001", "role": "user",      "ts": "…", "text": "what's hitting me",
-      "frame": { "width": 1920, "height": 1080, "bytes": 84012, "engine": "wgc", "detail": "low" },
-      "pinned": false, "compacted_out": false },
-    { "id": "t_0002", "role": "assistant", "ts": "…", "text": "…", "frame": null,
-      "pinned": true, "compacted_out": false }
-  ],
-  "counters": { "requests": 12, "input_tokens": 44120, "output_tokens": 3890,
-                "reasoning_tokens": 0, "cached_tokens": 0, "est_cost_usd": 0.0063 },
-  "prompt_history": ["what's hitting me", "…"]
-}
-```
-
-**`frame` stores metadata only — never image bytes.** No session file contains a screenshot, in any form.
-
-Writes are atomic (temp file + rename) with an fsync before rename. A `sessions/index.json` maps slug → `{key, exe_path_hash, title, turn_count, updated_at}` for the Sessions list without opening every file.
-
-**6.8.4 Resume behaviour**
-
-On hotkey press → probe → resolve key → look up slug → if a session file exists: load it, hydrate the transcript, restore the digest and counters, and mark the header `resumed`. If not: create in memory, mark `new`. Session load is capped (§10) and runs off the UI thread; a slow or corrupt file degrades to a fresh session with a toast (§7.11) rather than blocking the overlay.
-
-Resume survives: Sidekick restart, game restart, machine reboot, and overlay hide/show. It is **not** tied to the overlay being open — the conversation lives at the session layer.
-
-**6.8.5 Session lifecycle commands**
-
-| Action | Effect |
-| --- | --- |
-| Reset Session (tray) | Deletes the **current game's** conversation (file removed, counters gone) after confirmation |
-| `Ctrl+Shift+L` | Same as Reset Session, for the focused game |
-| `/new` | Archives the current conversation to `sessions/archive/<slug>-<timestamp>.json`, then starts a fresh one |
-| `/forget` | Deletes this game's conversation from disk without archiving |
-| `/export` | Copies the transcript to the clipboard, or saves it as `.md` — the only path by which data leaves the app, and only on explicit user action |
-| Retention | Keep the **50** most recently updated sessions; prune older files on startup and on each save |
-| Per-file cap | 1 MB of text; the oldest non-pinned turns are dropped past that, with a visible notice (a 1 MB transcript is roughly 8,000 turns — this is a safety valve, not a real limit) |
-
-### 6.9 Context Management & Compaction
-
-This is the mechanism that lets a conversation run for hours without the model forgetting, without latency growing, and without the context window ever being the limiting factor.
-
-**6.9.1 The three layers**
-
-| Layer | Content | Lifetime |
-| --- | --- | --- |
-| **1. System prompt** | The fixed Sidekick identity prompt (~80 tokens) | Static |
-| **2. Session digest** | A rolling plain-text summary, **≤ 250 words**, of everything compacted so far. Replaced in place on each compaction (`digest.version` increments) | Until the next compaction |
-| **3. Recent window** | The last `N` exchanges **verbatim**, with frames attached to the most recent `keep_recent_images` turns | Rolling |
-| **⊕ Pinned turns** | Any turn the player pinned — verbatim, exempt from compaction regardless of age | Until `/unpin` |
-
-**6.9.2 Transcript ≠ context (the safety rule)**
-
-- The **transcript** is the complete history. It is what the player scrolls. **Compaction never deletes, truncates, or edits a single turn of the transcript.**
-- The **context** is what gets sent to the API. Compaction only changes this.
-- Therefore compaction is always safe to perform, retry, or abandon: a bad digest degrades a future answer, it cannot destroy history.
-
-**6.9.3 Trigger & budget**
-
-| Parameter | Default | Notes |
-| --- | --- | --- |
-| `context_budget_tokens` | **12,000** | Soft threshold for the *next* request, estimated locally with `tiktoken-rs` and calibrated against the API's reported `input_tokens` |
-| `recent_window_exchanges` | 6 | Verbatim turns kept regardless of budget |
-| Hard ceiling | Model context window (1,050,000) | Never approached in practice; exists only as a backstop |
-| Trigger | `estimated_next_request_tokens > context_budget_tokens` | Checked **before** dispatch, on the request that would cross the line |
-| Overrun backstop | API context-length error → compact → retry once | AC-32 |
-
-**Why 12,000 and not 1,050,000?** Deliberate. The model's window is enormous, but a 12 K-token prompt is answered faster, costs almost nothing at Luna rates (12 K input ≈ $0.0012), and keeps the *relevant* material near the top where the model attends to it best. Compaction is a **coherence and latency tool**, not a capacity necessity.
-
-**6.9.4 Compaction procedure** (atomic, versioned, crash-safe)
-
-1. Snapshot the turns eligible for compaction: everything older than the recent window, **minus pinned turns**.
-2. If the eligible set is empty, do nothing (budget pressure is being caused by pinned turns — tell the player).
-3. One non-streaming call to the **compaction model** (default: cheapest available), with `reasoning.effort: none`, `max_output_tokens: 400`, `store: false`:
-   > Summarize this game-assistant conversation for your own future reference. Preserve: the player's current goal and progress; build/gear/stats facts you read from screenshots; decisions already made **and** options rejected, with the reason; unresolved questions and open threads; the player's stated preferences (verbosity, language, controls). Drop pleasantries. Plain text, ≤ 250 words.
-4. Input to that call = **`<existing digest>` + `<eligible transcript>`**, so each digest summarises the digest plus the new material in a **single pass** — no recursive re-summarisation, no drift.
-5. Persist the new digest with `version + 1`, `updated_at`, and `source_turn_count` atomically; mark affected turns `compacted_out: true` (a flag only — their text stays).
-6. Emit `sidekick://context-compacted`; the overlay shows `[context compacted · 24 → 6 turns · digest v3 · −18 turns]`.
-7. On any failure: keep the previous digest version, retry once, and surface a non-blocking notice. **Never** touch the transcript, and never block the answer the player asked for — if compaction fails, the turn proceeds with the previous context and a warning.
-
-**6.9.5 Frame policy in context**
-
-- Frames are attached to the **current query only**, plus the last `keep_recent_images` (default **1**) previous turn — so "compare this to what my screen looked like a minute ago" works.
-- All older frames are dropped from the context and replaced by the literal stub `[frame omitted — summarised in context]` inside the eligible set. Frame *metadata* stays in the transcript forever.
-- The digest prompt is explicitly told that frames are absent, so it never claims to have seen an image it did not see.
-
-**6.9.6 Player control**
-
-- `/compact` — force compaction now, print the resulting digest.
-- `/summary` — print the current digest, turn counts, token estimate, and budget headroom.
-- `/pin` / `/unpin` — pin the most recent assistant answer (or the last turn) so compaction can never drop it. Also available from a right-click menu on any transcript entry.
-- The status bar always shows `turns` and a context meter (`ctx 4.2k / 12k`), so the player is never surprised by compaction.
-
-### 6.10 REPL Command Surface
-
-Typed at the `λ` prompt; parsed before capture so a command never takes a screenshot or spends a token.
-
-| Command | Effect |
-| --- | --- |
-| `/help` | List commands with one-line descriptions |
-| `/new` | Archive this game's conversation and start a fresh one |
-| `/clear` | Clear the visible transcript only (disk history and context untouched) |
-| `/compact` | Force compaction now; show the new digest (§6.9.4) |
-| `/summary` | Show digest, turn counts, token estimate, budget headroom |
-| `/pin` / `/unpin` | Pin / unpin the most recent turn |
-| `/sessions` | List stored game conversations (turn count, last active); `/sessions <n>` switches |
-| `/usage` | Token + cost breakdown for this session, this game, and lifetime |
-| `/model [id]` | Show or change the chat model for this session (recorded in history) |
-| `/export` | Copy the transcript to the clipboard or save as `.md` |
-| `/forget` | Delete this game's conversation from disk (confirm required) |
-
-Unknown `/command` → inline "unknown command — try `/help`" and the text stays in the buffer. Any other input is sent as a normal prompt (capture + stream).
-
----
-
-## 7. Error Handling & Failure Modes
-
-| # | Failure | Detection | Behaviour | Recovery |
-| --- | --- | --- | --- | --- |
-| 7.1 | No eligible game in foreground | Probe rejects window | Tray notification "No game window focused" | Retries on next hotkey |
-| 7.2 | Capture fails | Engine error / `HRESULT` | `!! Capture failed — <reason>` in transcript | Other engine tried automatically first, then **Retry** |
-| 7.3 | Black frame | Mean-luminance sampling | "Captured a black frame (game minimised or on another desktop)" | One cross-engine retry, then explicit error |
-| 7.4 | Overlay hidden mid-stream | Hide event | Request aborted; partial answer kept, marked `⏹ cancelled` | — |
-| 7.5 | API 401 | HTTP status | "API key rejected — open Settings" | Inline button to Settings |
-| 7.6 | API 429 | Status + `Retry-After` | "Rate limited — retrying in Ns" with countdown | Auto-retry ≤ 2×, then manual **Retry** |
-| 7.7 | API 5xx / network drop | Status / IO error | "Connection lost" | Auto-retry once, then manual **Retry** |
-| 7.8 | Context length exceeded | API error | Compact, then retry once, notifying the player | AC-32 |
-| 7.9 | Model list empty / fetch failed | Filter result | Warning + **Show all models** + manual entry | — |
-| 7.10 | Hotkey already taken | `RegisterHotKey` error | Inline conflict message in the wizard | Re-record |
-| 7.11 | Session file corrupt / unreadable | JSON parse / schema | Back up to `<slug>.corrupt-<n>`, start a fresh session, toast the player, **never** crash | Automatic |
-| 7.12 | Config corrupt | Parse / schema failure | Back up `config.json.bak-<n>`, run the wizard with defaults | Automatic |
-| 7.13 | Disk full / write denied | IO error | "Cannot save conversation — disk full"; the turn still streams and is held in memory with a **Save failed** badge | Player frees space; retry on next turn |
-| 7.14 | Compaction call fails | HTTP / timeout | Non-blocking `!! compaction failed — continuing with previous context` | One retry on the next threshold crossing |
-| 7.15 | Crash | Panic / abort | Next launch: "Sidekick crashed last run" + log path; session files intact (atomic writes) | — |
-| 7.16 | WebView2 missing | Launch failure | Dialog with the official bootstrapper link | — |
-| 7.17 | Unknown model / price | Pricing table miss | Tokens shown, cost shown as `—` | User overrides price in Settings |
-
-**Logging** — `tracing` with daily-rotating files in `%APPDATA%\sidekick\logs\`. `error`/`warn` always, `info` normally, `debug`/`trace` only when a `verbose.log` marker file exists. **Frame bytes, API keys, and full conversation text are never logged**; keys are redacted to `sk-…last4`, session writes are logged as ids and counts only.
-
----
-
-## 8. Security & Privacy
-
-| Concern | Control |
-| --- | --- |
-| API key at rest | Windows Credential Manager via the `keyring` crate (service `sidekick`, user `openai`). Never in `config.json`, never sent to the webview — the UI receives only a boolean plus a masked display value |
-| Credential Manager unavailable | Fall back to a DPAPI-encrypted blob (`CryptProtectData`, user scope) in `secret.bin`, surfaced in the UI as a degraded-security state |
-| Key in transit | TLS only; endpoint pinned to `api.openai.com`; redirects to other hosts are not followed |
-| **Server-side retention** | **Every request sends `store: false`** — the Responses API otherwise retains responses ≈30 days. Applies to chat *and* compaction calls. AC-29 |
-| **Frames** | In-memory only. Never written to disk, never on the clipboard, never in logs or crash reports, never in session files (metadata only). Thumbnails are `blob:` URLs revoked on hide/reset |
-| **Conversation text** | **Persisted locally** — this is new in v1.2 and is disclosed in the wizard and in §9's notice. Stored as JSON under `%APPDATA%\sidekick\sessions\`, protected by the user profile's ACL, with optional DPAPI encryption (`encrypt_at_rest`, off by default). Never transmitted anywhere except to `api.openai.com` as request content |
-| Data sent to OpenAI | The composed context (§6.6.3) and the frame. No window titles, no process history, no identifiers, no machine fingerprint, no telemetry |
-| Webview hardening | Tauri v2 **capabilities** with a minimal allow-list; no `fs`/`shell`/`http` permissions beyond what is used; CSP set in `tauri.conf.json`; remote origins blocked |
-| Supply chain | Pinned `Cargo.lock`; `npm ci` only; no install scripts; dependency audit before each release |
-| Local telemetry | **None transmitted, ever.** Optional local counters (sessions, requests, tokens, errors, est. cost) live in `config.json` and are shown in Settings |
-| Reset / deletion | **Reset all data** in Settings clears config, credentials, every session, and the log directory |
-
----
-
-## 9. Product Scope: Offline, Single-Player, PvE
-
-**Decision (owner, C11): Sidekick is built for non-competitive, offline, single-player and PvE/co-op games. It is not intended for competitive or online multiplayer titles, and its anti-cheat exposure is designed down accordingly.**
-
-**Why this matters technically:** Sidekick captures the screen of a process that may have a kernel anti-cheat driver loaded. Anti-cheat products differ in what they inspect — injected modules, hooks, overlay windows, handle enumeration, known overlay-process signatures — and enforcement ranges from a warning to a permanent account ban. The engineering answer is not "be careful"; it is to not build a product that needs that risk.
-
-**Hard implementation constraints**
-
-1. **No injection.** No DLL injection, no hooking, no code patching, no `ReadProcessMemory`, and no handle to the game process beyond `GetForegroundWindow` plus process-name/path resolution.
-2. **No input automation.** The pilot never synthesises mouse or keyboard input. This is a product decision, not a technical limitation.
-3. **Ordinary window.** Sidekick is a standard top-level window — the same category of software as a voice chat app or a macro pad.
-4. **No game-state access.** No reading of save files, memory, logs, or network traffic. Frames and the player's own words are the entire input.
-
-**Enforcement**
-
-| Mechanism | Behaviour |
-| --- | --- |
-| Wizard notice (required checkbox) | *"Sidekick captures your screen to answer your questions. It is intended for single-player, offline and PvE games. Do not use it in competitive or online multiplayer titles — some anti-cheat systems treat screen capture as cheating and can ban your account. Sidekick never injects into or reads game memory."* |
-| Advisory title list | A bundled list of known competitive titles, **configurable without a release**. On match: a dismissible header warning `⚠ competitive title` plus a one-time modal. |
-| `competitive_title_action` | `warn` (default) or `block`. Default `warn` because the player owns the decision; `block` is one config change away for anyone who wants a hard stop. |
-| Repeat warning | Re-shown when a competitive title is focused, at most once per game per session |
-
-**Residual (not an engineering decision):** distribution, marketing, and any public release remain the owner's call. Nothing in the code changes if that decision differs — the constraints above hold regardless.
-
----
-
-## 10. Non-Functional Requirements
-
-| Requirement | Target | Measurement |
-| --- | --- | --- |
-| Screen capture (probe → base64) | **< 40 ms** | `Instant` timing in the capture engine, p95 over 100 runs on the test rig |
-| Hotkey → overlay visible | **< 100 ms** p95 | Hotkey callback timestamp vs. first rendered frame (`performance.now()`) |
-| Enter → request dispatched | **< 80 ms** | Rust timestamp before the `reqwest` send |
-| **Session load → transcript rendered** | **< 150 ms** p95 | Hotkey timestamp → first transcript paint, for a 500-turn session |
-| Time to first token | **≤ 1.5 s** p50 broadband | Stream instrumentation correlated by `request_id` |
-| **Compaction overhead** | **≤ 1.5 s** on the triggering turn | Digest call duration; compaction runs *before* dispatch so its latency is visible — measured and reported |
-| Idle memory | **< 45 MB** RSS | Task Manager, 10 min idle after use |
-| Idle CPU | **≤ 0.1 %** average | 60 s sample, Task Manager |
-| Peak memory during streaming | **< 120 MB** | Sampled during a 20-turn session |
-| UI-thread work | **< 4 ms** per task | Chrome DevTools trace on the overlay; no capture/encode/HTTP on the UI thread |
-| FPS impact on host game | **0** attributable dropped frames | PresentMon / in-game overlay, 10 min run, idle vs. baseline |
-| Capture determinism | ≤ 1 blank frame in 100 captures | Automated capture-loop harness |
-| Session write durability | 0 lost writes in a 1,000-save fault-injection run | Kill process mid-write; every file must parse |
-| Startup to tray-resident | < 2 s warm, < 4 s cold | Timed launch |
-| Accessibility | Full keyboard operation, visible focus, text ≥ 12 px, honours reduced-transparency settings | Manual audit |
-
----
-
-## 11. Test Strategy
-
-### 11.1 Rust unit tests
-
-- `openai/filter.rs` — allowlist/denylist truth table, tiering, empty intersection, escape hatch, cost-sort ordering
-- `openai/capabilities.rs` — per-model `reasoning.effort` gating (Luna accepts `none`, Astra must not receive it)
-- `openai/pricing.rs` — cost formula, cached-token discount, unknown-model `—`
-- `config.rs` — schema validation, clamping, migration, corrupt-file recovery
-- `session/store.rs` — key/slug derivation incl. path-hash collision case, atomic write, retention pruning, corrupt-file quarantine, round-trip of every field
-- `session/compaction.rs` — eligibility selection, pinned-turn exemption, single-pass digest merge, version increment, failure leaves the previous digest intact, **compaction never alters `turns[].text`**
-- `session/budget.rs` — trigger boundary conditions, token estimation calibration against reported usage, `keep_recent_images` policy
-- `capture/encode.rs` — downscale thresholds, quality/size targets, base64 correctness
-- `hotkey.rs` — combination parsing, conflict mapping
-
-### 11.2 Integration tests (`tauri::test`)
-
-- Full IPC path: wizard save → tray → hotkey → session load → capture → stream → compaction → reset
-- Mocked Responses-API SSE fixture: normal stream, `response.completed` usage, mid-stream disconnect, 429 + `Retry-After`, context-length error, reasoning-token payload, unknown event type
-- Compaction against a mocked endpoint: assert the next request's `input` contains the digest, excludes old frames, and includes pinned turns verbatim
-- Golden-frame test: capture a known test pattern, assert dimensions and mean luminance within tolerance
-- Fault injection: kill the process during session writes and during compaction; assert every file still parses
-
-### 11.3 Manual matrix
-
-Windowed · borderless fullscreen · exclusive fullscreen (degraded) · alt-tab mid-stream · rapid hotkey spam · two overlays in sequence · 100 consecutive requests · game restart with Sidekick running · **Sidekill restart with the game running** · **Sidekick restart with the game closed, then reopen the game** · two games alternating 20× (isolation check) · a 500-turn session (compaction + scrollback + perf) · pinning across a compaction · multi-monitor mixed DPI · 4K · HDR · minimised game · UAC prompt · corrupt session file · disk-full simulation · `store: false` verified in a network capture
-
-### 11.4 Test-game matrix
-
-| Game | Mode | Purpose |
-| --- | --- | --- |
-| Elden Ring | Borderless | Primary target (named in the PRD's own status line) |
-| Cyberpunk 2077 | Borderless / windowed | High-DPI, HDR |
-| Any offline single-player title | Windowed | Second session key, isolation testing |
-| Notepad (non-game) | Windowed | Non-game baseline |
-| Exclusive-FS title | Exclusive | Degraded-mode validation only |
-
-### 11.5 Performance harness
-
-A `--bench` flag runs 100 capture cycles, 20 mocked streams, and 10 simulated compaction cycles, printing p50/p95 for every budgeted operation. Committed to CI as a report rather than a hard gate (hardware variance), flagging any > 20 % regression.
+| **R-1** | **No overlay.** The user must alt-tab to a terminal to ask a question. This is a materially worse experience than a floating overlay and is the main thing users will notice is missing. | **High** | Accepted for v0.1.0. The whole point of shipping the package first is to learn whether the *conversation quality* justifies an overlay before building one. If it does, §11.1 describes the upgrade path |
+| **R-2** | `screenshot-desktop` uses a GDI/DXGI screen copy. It may return **black frames under exclusive fullscreen** — the same class of failure the deprecated PRD analysed in §6.4 | Medium | E4 handles it honestly. Fallback ladder: (1) retry once, (2) instruct the user to use borderless fullscreen, (3) future: a WGC capture path |
+| **R-3** | `active-win@9.0.0` is a native module last published 2024-04-30; prebuilt binaries may not cover Node 22 on some Windows builds | Medium | `/gs setup` verifies it at install time. Fallback: `child_process` + PowerShell `Get-Process`/`GetWindowRect` P/Invoke, which needs no native module |
+| **R-4** | `sharp` is a large native dependency (~30 MB installed) | Low | Acceptable for prebuilt-binary installs. Fallback: send the full display uncropped and let the model cope (worse accuracy, higher token cost) |
+| **R-5** | HWNDs are recycled by Windows; a persisted binding can point at an unrelated window | Medium | §6.1.2 — bindings are validated against the live window list on every `session_start` and before every capture, and never trusted blindly |
+| **R-6** | Capturing on every prompt adds latency to the first token | Low | Budget 3s (§10 E10). Frames are pre-decoded and base64 strings are reused where the hash matches |
+| **R-7** | `ctx.ui.setStatus` is a no-op in RPC mode, so the package looks broken under an RPC host | Low | Detect `ctx.mode !== "tui"` at load and fall back to `ctx.ui.notify` for important state only. Documented as TUI-first |
+| **R-8** | Users expect an overlay, install this, and are disappointed | Medium | README leads with what it *is*. `/gs help` states it. The package name says "gamer", not "overlay" |
+
+### 11.1 Upgrade path if the overlay turns out to matter
+
+Recorded so the decision is not re-litigated later. **Not in scope now.**
+
+Option B from the original discussion: keep this package as the entire brain, and add a thin **Tauri shell** that owns only the window, tray, and global hotkey, driving pi over RPC (`pi --mode rpc`). `prompt` already accepts `images: [{ type: "image", data, mimeType }]`, and token deltas already stream as `message_update` / `text_delta`. The capture, binding, session, and compaction logic in this PRD would be reused unchanged — it is all in the package.
 
 ---
 
 ## 12. Acceptance Criteria
 
-### Configuration & lifecycle
+### 12.1 Core loop
 
-| ID | Scenario | Pass condition |
+| ID | Scenario | Expected outcome |
 | --- | --- | --- |
-| AC-01 | First boot, no config | Wizard opens; tray icon **does not** exist until setup completes |
-| AC-02 | Model fetch with invalid key | Inline 401 error; model select stays disabled; no crash |
-| AC-03 | Model fetch with valid key | Only allowlisted multimodal models; `gpt-6-luna` present; embeddings/tts/whisper/codex/realtime absent |
-| AC-04 | Complete setup | Key in Credential Manager, config persisted, wizard hidden, tray resident, hotkey works |
-| AC-05 | Hotkey with game focused | Overlay visible < 100 ms p95; header shows correct process name |
-| AC-06 | Hotkey with no game focused | No overlay; tray notification explains why |
-| AC-07 | Submit prompt | Frame captured (badge shows real dimensions/size/engine), request dispatched < 80 ms, tokens stream |
-| AC-08 | Frame never hits disk | A full capture+stream cycle leaves no new image files anywhere under `%APPDATA%\sidekick` (automated check) |
-| AC-09 | Key never in config | `config.json` and session files contain no key material (grep-based test) |
-| AC-10 | `Escape` mid-stream | Request aborted (truncated SSE observable), partial answer kept and marked cancelled |
-| AC-11 | `Escape` while idle | Overlay hides; the game window regains keyboard focus |
-| AC-12 | `Ctrl+L` | Visible transcript cleared; on-disk history and context **unchanged** |
-| AC-13 | `↑` / `↓` | Last 20 prompts for this session, in order |
-| AC-14 | Windowed / borderless game | WGC path used; full support |
-| AC-15 | Exclusive fullscreen game | Degraded mode with an explicit explanation; no crash; no black frame silently sent |
-| AC-16 | Black frame / minimised game | Detected, retried once cross-engine, then explicit error |
-| AC-17 | 429 from API | Countdown shown, ≤ 2 auto-retries, then manual **Retry** |
-| AC-18 | Tray → Settings | Values pre-filled; key masked; raw key never reaches the webview |
-| AC-19 | Hotkey conflict | Save blocked on that field with a clear "in use" message |
-| AC-20 | Idle footprint | ≤ 45 MB RSS and ≤ 0.1 % CPU over 60 s after a session |
-| AC-21 | Second launch | Existing instance focused; no duplicate tray icon |
-| AC-22 | Crash then relaunch | Crash notice with log path; every session file still parses |
+| **AC-GS-01** | Bind with `/gs play`, then ask a question about the game | The question is answered with reference to the current frame; status shows `[FRAME #n · <exe>]` |
+| **AC-GS-02** | Ask a question immediately after a visible screen change | The attached frame shows the state *after* the change, not before |
+| **AC-GS-03** | Alt-tab to another app before pressing `Enter` | The captured frame is still the **bound game window**, not the alt-tab target |
+| **AC-GS-04** | Answer a question that cannot be answered from the frame | The model says so, rather than inventing detail |
 
-### Sessions, context & compaction
+### 12.2 Sessions
 
-| ID | Scenario | Pass condition |
+| ID | Scenario | Expected outcome |
 | --- | --- | --- |
-| AC-23 | Per-game isolation | 20 alternating prompts across two games produce two disjoint transcripts and two disjoint contexts; no cross-contamination in any request payload |
-| AC-24 | Resume after game restart | Same game, Sidekick running throughout: transcript, digest, and counters restored exactly |
-| AC-25 | Resume after Sidekick restart | Sidekill quit and relaunched while the game stays open: same transcript and context; header shows `resumed` |
-| AC-26 | Resume after machine reboot | Same guarantees as AC-25 across a full process and machine restart |
-| AC-27 | First-ever session | A new game creates its session lazily on the first prompt, not on hotkey press |
-| AC-28 | Compaction trigger | Crossing the budget compacts before dispatch; overlay shows `[context compacted · N → 6 turns · digest vM]`; the answer still arrives |
-| AC-29 | **`store: false`** | Every request to `/v1/responses`, chat and compaction, carries `store: false` — verified by network capture |
-| AC-30 | Compaction preserves history | After compaction, every pre-compaction turn is still present and unedited in the scrollback and on disk |
-| AC-31 | Pinned turns survive | A pinned turn from 40 turns ago is still sent verbatim after two compactions |
-| AC-32 | Context-length overrun | An injected context-length error triggers compaction + one retry, and the turn succeeds |
-| AC-33 | Frame policy in context | Exactly `keep_recent_images` + the current query carry frames; older frames are absent from the payload and replaced by stubs; frame metadata survives in the transcript |
-| AC-34 | Compaction failure is non-fatal | With the compaction endpoint failing, the player's turn still streams, with a non-blocking warning, and the previous digest is intact |
-| AC-35 | Atomicity | Killing the process during session writes and during compaction leaves every file parseable; no turn is lost |
-| AC-36 | Commands | `/help /new /clear /compact /summary /pin /unpin /sessions /usage /model /export /forget` all behave as specified; no command triggers a capture or an API call except `/model` and `/compact` |
-| AC-37 | Usage & price | Footer shows tokens + elapsed + estimated price per answer; `/usage` shows session, per-game and lifetime totals; an unknown model shows `—` rather than a guess |
-| AC-38 | Retention | Sessions beyond the 50 most recent are pruned; the 1 MB per-file cap produces a visible notice |
-| AC-39 | Delete / export | `/forget` removes the game from disk; `/export` writes a `.md` transcript; **Reset all data** empties config, credentials, sessions and logs |
-| AC-40 | Competitive-title handling | A listed title triggers the warning in `warn` mode and a refusal in `block` mode |
+| **AC-GS-05** | Bind game A, ask three questions; bind game B, ask one | Game B's session contains none of game A's turns |
+| **AC-GS-06** | Rebind game A after restarting pi | `/gs play` offers the existing `gamer-sidekick/<slug>` session; switching restores the full transcript |
+| **AC-GS-07** | Drive one game session past the compaction threshold | Compaction runs, the transcript is unchanged, and the model still remembers earlier facts |
+| **AC-GS-08** | `/gs games` with two sessions | Lists both with message counts; selecting one switches to it |
 
-### Host-application safety
+### 12.3 Privacy
 
-| ID | Scenario | Pass condition |
+| ID | Scenario | Expected outcome |
 | --- | --- | --- |
-| AC-41 | No injection | Codebase contains no `WriteProcessMemory`, `CreateRemoteThread`, `SetWindowsHookEx`, or `ReadProcessMemory`; enforced by a CI grep gate |
-| AC-42 | Idle in-game for 10 min | 0 attributable dropped frames; overlay never steals focus on its own |
+| **AC-GS-09** | Run a session with 20 captured frames; inspect every session JSONL file | **Zero** base64 image payloads on disk. Frame records contain metadata only |
+| **AC-GS-10** | Search `%TEMP%`, `%APPDATA%`, and the package directory after a capture session | No new image files |
+| **AC-GS-11** | Grep the installed package for filesystem writes | Only the config/binding writes in §6.1; no image buffer is ever passed to a write call |
+
+### 12.4 Failure behaviour
+
+| ID | Scenario | Expected outcome |
+| --- | --- | --- |
+| **AC-GS-12** | Close the game window, then ask a question | Text answer, explicit "frame unavailable", stale-binding notice, no crash |
+| **AC-GS-13** | Run in exclusive fullscreen | Either a correct frame, or E4's honest black-frame warning. Never a silent wrong answer |
+| **AC-GS-14** | Uninstall the package and reinstall | No leftover state prevents a clean start; `/gs setup` re-runs |
+| **AC-GS-15** | Load the package on macOS or Linux | Loads without throwing; capture reports unavailable |
+
+### 12.5 Integration and hygiene
+
+| ID | Scenario | Expected outcome |
+| --- | --- | --- |
+| **AC-GS-16** | `pi install npm:pi-gamer-sidekick` | Installs with dependencies; no build step, no compiler, no `node-gyp` invocation on the user's machine (prebuilt binaries only) |
+| **AC-GS-17** | Load the package in a pi session with no game bound | Zero captures occur; only the status hint appears |
+| **AC-GS-18** | Two pi sessions running simultaneously, bound to different games | Each captures its own window; no cross-talk |
+| **AC-GS-19** | Select a text-only model via `/model` | Capture is skipped (E7); the package does not waste a capture |
+| **AC-GS-20** | `npm pack` the package and inspect the tarball | No `node_modules`, no bundled copy of a host-provided package, `pi-package` keyword present |
 
 ---
 
-## 13. Milestones & Definition of Done
+## 13. Milestones
 
-| Milestone | Content | Exit criteria |
+| ID | Scope | Done when |
 | --- | --- | --- |
-| **M0 — Scaffold** | Git workflow, Tauri v2 + React + TS + Tailwind, capabilities, tray shell, logging, CI | Builds clean; `tauri dev` shows an empty transparent always-on-top window; unit-test harness green; CI grep gate for AC-41 in place |
-| **M1 — Config & lifecycle** | Config schema, Credential Manager, wizard, tray menu, single instance, hotkeys | AC-01, AC-04, AC-06, AC-18, AC-19, AC-21 |
-| **M2 — Capture engine** | Window probe, WGC path, DXGI fallback, encode, black-frame detection, bench harness | AC-07 (capture half), AC-15, AC-16; capture < 40 ms |
-| **M3 — Overlay REPL** | Overlay window, anchor/geometry, focus return, PEEK mode, transcript, markdown streaming, frame badge, `/help` | AC-05, AC-10, AC-11, AC-12, AC-13 |
-| **M4 — AI pipeline** | Responses API client, SSE streaming, model filter + cost sorting + capability map + pricing, context assembly, usage footer | AC-02, AC-03, AC-07, AC-08, AC-09, AC-14, AC-17, AC-29, AC-37 |
-| **M5 — Sessions & context engine** | Per-game session store, atomic persistence, resume, digest + compaction, budget enforcement, pinning, full slash-command surface, tray Sessions menu | AC-23 … AC-36, AC-38, AC-39, AC-40 |
-| **M6 — Hardening** | Full error matrix, crash recovery, DPI/multi-monitor, idle footprint, 100-request soak, 500-turn session soak, fault injection | AC-20, AC-22, AC-35, AC-41, AC-42 + the whole §11.3 matrix |
-| **M7 — Ship** | Signed NSIS installer, updater, README/usage docs, pilot build | Installer runs clean on a fresh machine; AC-01 … AC-42 pass |
+| **M0** | Skeleton package: manifest, `/gs help`, `/gs status`, clean load everywhere | AC-GS-16, AC-GS-15, AC-GS-17 |
+| **M1** | Binding: `/gs play` picker, identity/slug, stale-handle validation, display resolution | AC-GS-03, AC-GS-05 |
+| **M2** | Capture pipeline + `before_agent_start` + `context` injection | AC-GS-01, AC-GS-02, **AC-GS-09**, AC-GS-10 |
+| **M3** | Failure handling: closed, minimized, black, slow, crop-clamp | AC-GS-12, AC-GS-13 |
+| **M4** | Sessions: naming, switch, `/gs games`, autoswitch, compaction transparency | AC-GS-05, AC-GS-06, AC-GS-07, AC-GS-08 |
+| **M5** | Polish: tools, pinning, status line, accounting, prompt section, README, `/gs setup` | AC-GS-04, AC-GS-11, AC-GS-14, AC-GS-18, AC-GS-19, AC-GS-20 |
 
-**Definition of Done (per milestone):** reviewed · unit tests for new logic · `cargo clippy -- -D warnings` clean · `cargo fmt --check` clean · no high/critical `npm audit` findings · milestone acceptance criteria demonstrated on the test rig · **this PRD updated if reality diverged from it** · one commit per milestone on `main` via a PR.
+M2 is the milestone that matters. **If frames cannot be attached without hitting disk, stop and re-scope** (see §6.3.2 — the `context` hook is the mechanism, and it is the design's load-bearing assumption).
 
 ---
 
@@ -804,247 +684,44 @@ A `--bench` flag runs 100 capture cycles, 20 mocked streams, and 10 simulated co
 
 ### 14.1 Resolved
 
-| ID | Decision | Rationale | Date |
-| --- | --- | --- | --- |
-| D2 | **Offline / single-player / PvE only.** Competitive online titles are out of scope; advisory warning list with a `warn`/`block` switch | Owner's product decision. Removes the dominant risk class rather than trying to manage it | 2026-10-04 |
-| D3 | **Responses API** (`/v1/responses`), streaming, `store: false` | Current OpenAI surface; supports reasoning-effort control; `store: false` gives us the privacy posture v1.0 wanted | 2026-10-04 |
-| D4 | **Cheapest models.** Default `gpt-6-luna` ($0.10/$0.50); picker cost-sorted; compaction on the cheapest model | 100× cheaper than `gpt-6-astra` with ample quality for this task; tagged "Default" by OpenAI for high-volume work | 2026-10-04 |
-| D6 | **Continuous context with compaction**, replacing the fixed 3-turn window | A fixed window either forgets or grows unbounded; compaction gives unbounded conversation at bounded latency and cost | 2026-10-04 |
-| D9 | **No cost guardrails.** Display-only usage and pricing in the overlay | It is the player's key and their spend; guardrails would be paternalistic. Visibility is the right answer | 2026-10-04 |
-| D10 | **Git repository** on branch `main`; Conventional Commits; CI from day one | Needed for the milestone PR workflow and the CI grep gate | 2026-10-04 |
-| D12 | **Explicit history, not `previous_response_id`** | Compaction must prune deterministically and drop images; `store: false` removes server-side chaining anyway | 2026-10-04 |
-| D13 | **Transcript and context are separate stores** | Compaction must never be able to destroy player history | 2026-10-04 |
-| D14 | **Compaction threshold 12,000 tokens**, far below the 1.05 M window | Bought as a coherence and latency optimisation, not for capacity; costs ~$0.0012 per request at Luna rates | 2026-10-04 |
-
-### 14.2 Still open
-
-| ID | Question | Options | Recommendation | Blocks |
-| --- | --- | --- | --- | --- |
-| **D1** | Filter maintenance | (a) hard-coded regex, (b) remote list, (c) hard-coded + "Show all models" | **(c)** for the pilot | Nothing — the escape hatch de-risks it |
-| **D5** | Default hotkey | `Alt+Space` vs `Ctrl+Shift+Space` | **`Alt+Space`** with conflict detection — matches launcher muscle memory | — |
-| **D7** | Click-through | Whole-window `[PEEK]` mode vs none | **Keep `[PEEK]`** — pixel-accurate is unavailable in Tauri v2 | M3 |
-| **D8** | Distribution | Signed NSIS / winget / store | **Signed NSIS first**, winget after pilot | M7 |
-| **D11** | `gpt-6.1-sol` pricing | Verify against `developers.openai.com/api/docs/pricing` during M4 and fill the table | **Verify in M4**; until then Sol shows tokens with `—` cost | M4 |
-| **D15** | Transcript encryption default | Off (plain JSON, profile ACL) vs on (DPAPI) | **Off**, with a one-click toggle — plaintext keeps export, grep, and debugging sane; the API key is always in Credential Manager regardless | M5 |
-| **D16** | Session title generation | First prompt truncated vs a cheap model-generated title | **Truncated first prompt for the pilot**; model-generated titles are a cheap post-pilot win | M5 |
-| **D17** | Archive vs delete for `/new` | Keep archived copies vs discard | **Archive to `sessions/archive/`** with a 50-file cap | M5 |
-
-### 14.3 Assumptions
-
-| ID | Assumption |
-| --- | --- |
-| A1 | Windows 10 1809+ / 11, x64, WebView2 runtime present or bootstrapped by the installer |
-| A2 | The player owns an OpenAI API account and pays their own usage; Sidekick bundles or resells nothing |
-| A3 | Target games run windowed or borderless fullscreen; exclusive fullscreen is explicitly degraded |
-| A4 | Test rig is a single-GPU mid-range gaming PC; hybrid graphics / multi-GPU is out of pilot scope |
-| A5 | Rust 1.99, Node 22, npm 12 available (verified present) |
-| A6 | `/v1/models` still exposes no per-model capability metadata (true as of 2026-10-04) |
-| A7 | `windows-capture` 2.x and the `windows` crate's DDA bindings stay compatible with the pinned toolchain |
-| A8 | Players read English in the overlay; i18n is post-pilot |
-| A9 | Single local user session; no RDP or multi-user support |
-| A10 | No telemetry is transmitted in the pilot |
-| A11 | Conversation persistence is desirable and consented to — disclosed in the wizard notice and §8 |
-| A12 | Per-game isolation keyed by executable is sufficient granularity; per-save-file or per-playthrough isolation is **not** required |
-| A13 | `tiktoken-rs` can approximate GPT-6-family tokenisation well enough for a soft threshold, with the API's reported usage as the calibration source of truth |
-
----
-
-## 15. Technical Architecture
-
-### 15.1 File layout
-
-```
-sidekick/
-├── docs/
-│   ├── PRD.md                     # this document
-│   └── adr/                       # one ADR per decision in §14
-├── .github/workflows/ci.yml       # fmt, clippy, tests, AC-41 grep gate
-├── src/                           # React + Vite + TypeScript + Tailwind
-│   ├── main.tsx
-│   ├── App.tsx                    # wizard | settings | overlay, driven by window label
-│   ├── components/
-│   │   ├── config/                # OpacitySlider, SizeSliders, ApiKeyField, ModelSelect,
-│   │   │                          # HotkeyRecorder, IntegrityNotice, AnchorSelect, UsagePanel
-│   │   ├── repl/                  # ReplTranscript, PromptInput, CommandSuggestions,
-│   │   │                          # FrameBadge, StatusBar, MarkdownStream, CostFooter,
-│   │   │                          # ContextMeter, CompactionNotice, ErrorBlock, PinToggle
-│   │   └── sessions/              # SessionsList (tray-driven)
-│   ├── state/
-│   │   ├── overlayMachine.ts      # reducer: idle | capturing | streaming | compacting | error
-│   │   └── viewStore.ts           # read-model mirroring Rust state (never authoritative)
-│   ├── hooks/
-│   │   ├── useTauriStream.ts      # stream-token / done / error / context-compacted listeners
-│   │   ├── useSession.ts          # session load/hydrate
-│   │   └── useConfig.ts
-│   ├── lib/
-│   │   ├── ipc.ts                 # typed invoke() wrappers — the ONLY IPC surface
-│   │   ├── commands.ts            # slash-command parser and dispatch table
-│   │   └── format.ts
-│   └── styles/                    # repl.css (scanlines, blur, reduced-transparency), tailwind.css
-└── src-tauri/
-    ├── Cargo.toml
-    ├── tauri.conf.json            # window defs, CSP, NSIS bundler, updater
-    ├── capabilities/              # wizard.json, settings.json, overlay.json — narrowest sets
-    ├── icons/
-    └── src/
-        ├── main.rs                # entry, single-instance, window labels
-        ├── lib.rs                 # run(): builder, plugins, tray, hotkey, IPC registration
-        ├── error.rs               # AppError → { code, message, hint, retryable }
-        ├── app_state.rs           # config, active session, capture engine, cancel tokens, counters
-        ├── config.rs              # serde schema, defaults, clamping, migration, atomic save
-        ├── secrets.rs             # keyring → Credential Manager, DPAPI fallback
-        ├── tray.rs                # icon, menu, dynamic enable/disable, Sessions submenu
-        ├── hotkey.rs              # register/unregister/parse, conflict mapping
-        ├── overlay.rs             # anchor, geometry, focus return, PEEK mode, adaptive transparency
-        ├── usage.rs               # token accounting, cost formula, per-session/lifetime totals
-        ├── telemetry.rs           # local-only counters
-        ├── capture/
-        │   ├── mod.rs             # CaptureEngine trait + engine selection + serialized worker
-        │   ├── window_probe.rs    # GetForegroundWindow, process name/path, client rect, DPI
-        │   ├── wgc.rs             # windows-capture path (windowed/borderless)
-        │   ├── dxgi.rs            # Desktop Duplication path (exclusive FS), cached handles
-        │   ├── luminance.rs       # black-frame heuristic
-        │   └── encode.rs          # crop, downscale, JPEG q85, base64 data URI
-        ├── openai/
-        │   ├── mod.rs
-        │   ├── client.rs          # Responses API: streaming SSE, store:false, cancel, retries, timeouts
-        │   ├── filter.rs          # multimodal allowlist/denylist (pure, unit-tested)
-        │   ├── capabilities.rs    # per-model reasoning-effort / context-window / endpoint support
-        │   ├── pricing.rs         # built-in table + user overrides + cost formula
-        │   └── types.rs           # request/input-array/SSE-event types
-        ├── session/
-        │   ├── mod.rs
-        │   ├── store.rs           # load/save/atomic write, slug + path hash, retention, quarantine
-        │   ├── identity.rs        # process → (key, exe_path_hash, slug) resolution
-        │   ├── context.rs         # input assembly: system + digest + pinned + recent window + query
-        │   ├── budget.rs          # tiktoken-rs estimation, calibration, trigger decision
-        │   ├── compaction.rs      # eligibility, digest call, versioned atomic commit, failure paths
-        │   ├── digest.rs          # digest prompt + single-pass merge
-        │   └── titles.rs          # session titles (truncated first prompt)
-        └── ipc.rs                 # every #[tauri::command] in one auditable surface
-```
-
-### 15.2 IPC contract
-
-**Commands** (webview → Rust; Rust authoritative)
-
-| Command | Args | Returns |
+| ID | Decision | Rationale |
 | --- | --- | --- |
-| `config_load` | — | `Config` (never includes the key; `has_api_key: bool`) |
-| `config_save` | `Config` | `()` — validates, then writes credential + file atomically |
-| `secrets_set_api_key` / `secrets_clear_api_key` | `api_key: String` / — | `()` |
-| `models_validate_key` | `api_key: String` | `{ ok: bool, error?: AppError }` |
-| `models_list` | — | `{ models: ModelEntry[], total, filtered_out, unknown_pricing }` |
-| `hotkey_register` | `combo: String` | `{ ok: bool, conflict?: String }` |
-| `overlay_toggle` | — | `{ visible: bool, target?: string, session?: SessionSummary }` |
-| `overlay_set_mode` | `interactive \| peek` | `()` |
-| `overlay_set_geometry` | `{ width, height, anchor, opacity }` | `()` |
-| `prompt_send` | `{ text: String }` | `{ request_id }` — session resolve → budget check → compaction → capture → dispatch |
-| `prompt_abort` | `request_id` | `()` |
-| `session_list` | — | `SessionSummary[]` (key, title, turns, updated_at, pinned_count) |
-| `session_open` | `slug` | `SessionDetail` — loads and hydrates the overlay |
-| `session_new` | `{ archive: bool }` | `SessionDetail` |
-| `session_delete` | `slug` | `()` — `/forget` |
-| `session_reset_current` | — | `()` — tray **Reset Session** |
-| `session_export` | `format: "clipboard" \| "markdown"` | `{ path? }` |
-| `session_set_pin` | `{ turn_id, pinned }` | `()` |
-| `context_status` | — | `{ turns, digest_version, est_tokens, budget, compacted_turns }` |
-| `context_force_compact` | — | `{ ok, digest, version, est_tokens }` |
-| `usage_summary` | `scope: "request" \| "session" \| "game" \| "lifetime"` | `{ input, output, reasoning, cached, est_cost_usd, model, price_basis }` |
-| `app_diagnostics` | — | `{ version, os, gpu, idle_rss_kb, log_dir, sessions_dir, uptime_s }` |
-| `app_reset_all_data` | — | `()` — config, credentials, sessions, logs |
-| `app_quit` | — | `()` |
+| **G-D1** | Ship as a pi package, not a standalone app | Pi already provides image attachment, streaming, sessions, compaction, model selection, and cost accounting. Rebuilding them is the exact cost the pivot avoids |
+| **G-D2** | **No overlay window in v0.1.0** | Unreachable from inside a pi package: `registerShortcut` needs pi's terminal focused, and RPC mode makes `onTerminalInput()` a no-op. The window is possible only from an external host (§11.1) |
+| **G-D3** | Capture target is a **bound window**, not the foreground window | The foreground window at capture time is the terminal the user is typing in. Foreground capture is structurally wrong for this product |
+| **G-D4** | Inject frames at the **`context`** event, not by rewriting the user message | `before_agent_start`'s message result is persisted to the session file; that would write ~330 KB of base64 per turn. `context` is request-local and restores state afterwards, so pixels never touch disk (INV-2) |
+| **G-D5** | Frame budget: 1 live + 3 pinned | Bounded cost and context coherence; more than one frame per turn answers almost no real question |
+| **G-D6** | No model list, pricing table, or API-key handling | pi owns all three. Duplicating them guarantees drift |
+| **G-D7** | Non-competitive games only; advisory list, `warn` by default | Carried forward from the deprecated PRD; product policy, not architecture |
+| **G-D8** | Capture failure never fails the question | A gaming companion that silently drops your question is worse than one that answers without a frame |
+| **G-D9** | TUI mode is the primary target | `setStatus` and keyboard shortcuts are TUI-only. RPC is supported for status, but not a first-class target |
+| **G-D10** | Rename to **Gamer Sidekick** | Distinguishes from the deprecated standalone product and from pi's own "Sidekick" reference in `active-win`'s browser list |
 
-**Events** (Rust → webview)
+### 14.2 Open — owner decision needed
 
-| Event | Payload |
-| --- | --- |
-| `sidekick://stream-token` | `{ request_id, delta }` |
-| `sidekick://stream-done` | `{ request_id, usage, latency_ms, est_cost_usd, model }` |
-| `sidekick://stream-error` | `{ request_id, error: AppError, retryable }` |
-| `sidekick://frame-captured` | `{ request_id, index, width, height, engine, bytes, encode_ms, detail }` |
-| `sidekick://context-compacted` | `{ request_id?, from_turns, to_turns, digest_version, removed, est_tokens }` |
-| `sidekick://session-changed` | `{ slug, key, title, turns, resumed, created }` |
-| `sidekick://overlay-state` | `{ visible, mode, target_process, target_title, advisory? }` |
-| `sidekick://config-changed` | `Config` |
-| `sidekick://usage-updated` | `{ input, output, reasoning, cached, est_cost_usd }` |
-
-**Rules:** every command validates input and returns `Result<T, AppError>`; `AppError` carries `{ code, message, hint, retryable }` so the UI never parses strings. Blocking work (capture, encode, session IO) runs in `spawn_blocking` behind a mutex so no two captures or two session writes overlap.
-
-### 15.3 Config schema (`%APPDATA%\sidekick\config.json`)
-
-```jsonc
-{
-  "schema_version": 2,
-  "window": { "width": 480, "height": 620, "opacity": 0.85, "anchor": "top-right", "margin": 24 },
-  "overlay": { "mode": "interactive", "reduced_transparency": "auto" },
-  "ai": {
-    "provider": "openai",
-    "model": "gpt-6-luna",
-    "compaction_model": "gpt-6-luna",
-    "detail": "auto",
-    "max_output_tokens": 700,
-    "reasoning_effort": "none"
-  },
-  "context": {
-    "budget_tokens": 12000,
-    "recent_window_exchanges": 6,
-    "keep_recent_images": 1,
-    "digest_max_words": 250,
-    "compaction_max_output_tokens": 400
-  },
-  "sessions": { "max_sessions": 50, "max_bytes_per_file": 1048576, "encrypt_at_rest": false,
-                "prompt_history_depth": 20 },
-  "capture": { "engine": "auto", "jpeg_quality": 85, "max_dimension": 1920, "black_frame_retry": true },
-  "hotkey": "Alt+Space",
-  "autostart": false,
-  "competitive_title_action": "warn",
-  "integrity_notice_accepted_at": "2026-10-04T19:00:00Z",
-  "pricing": { "gpt-6-luna": { "input": 0.10, "cached_input": 0.01, "output": 0.50 },
-               "gpt-6-astra": { "input": 10.00, "cached_input": 1.00, "output": 50.00 } },
-  "local_counters": { "sessions": 0, "requests": 0, "tokens_in": 0, "tokens_out": 0, "est_cost_usd": 0.0, "errors": 0 }
-}
-```
-
-Unknown keys are preserved on save (forward compatibility). Writes are atomic; the last known-good config is kept as `config.json.bak-<n>`. `schema_version` drives migrations.
-
-### 15.4 Threading model
-
-| Thread / task | Responsibility |
-| --- | --- |
-| Main (UI) | Tauri, tray, hotkey callbacks. **Never** captures, encodes, does HTTP, or touches session files |
-| Capture worker (`spawn_blocking`, dedicated, **serialized**) | Probe → engine → crop → encode → base64. Caches DDA handles and the WGC session |
-| Session IO (`spawn_blocking`, **serialized**) | Load, atomic save, prune, quarantine |
-| HTTP task (Tokio, one per `request_id`) | Responses API SSE reader → `Emitter::emit` per delta; honours the request's `CancellationToken` |
-| Compaction task (Tokio, on demand) | Digest call before dispatch; runs **ahead of** the player's request so its latency is measurable, never silently blocking |
-| Frontend | Render-only. All state arrives via events; `state/overlayMachine.ts` is the only writer |
-
-### 15.5 Key dependencies (pinned)
-
-| Purpose | Crate / package |
-| --- | --- |
-| WGC capture | `windows-capture` (2.x) |
-| DXGI fallback + Win32 APIs | `windows` |
-| Async runtime / HTTP / SSE | `tokio`, `reqwest` (`rustls`, `stream`) |
-| Serialization | `serde`, `serde_json` |
-| Secrets | `keyring` (Credential Manager), DPAPI fallback |
-| Logging | `tracing`, `tracing-subscriber`, `tracing-appender` |
-| Image | `image` (crop/resize/encode) |
-| Token estimation | `tiktoken-rs` (soft budgeting; API-reported usage is the truth) |
-| Frontend | `react`, `react-dom`, `vite`, `typescript`, `tailwindcss` |
-| Tauri plugins | `global-shortcut`, `store`, `single-instance`, `autostart`, `updater`, `opener` |
+| ID | Question | Recommendation |
+| --- | --- | --- |
+| **G-O1** | Package name: `pi-gamer-sidekick` vs `@<owner>/pi-gamer-sidekick`? | Scoped name if publishing publicly; unscoped is fine for a private install |
+| **G-O2** | Should `/gs play` be required, or should the first `/gs` invocation in a session prompt to bind? | Prompt once per session on the first captured turn, then stay silent |
+| **G-O3** | Pin limit 3 vs 5? | 3 — pinned frames are re-injected every turn, and each costs ~1,100 tokens of permanent context |
+| **G-O4** | Auto-switch to another game's session when the bound game changes, or warn? | Warn (autoswitch off by default) — silent conversation swapping loses context the user cannot see |
+| **G-O5** | Competitive-title list: ship one, or leave the hook empty? | Ship a short starter list; users can edit it without a code change |
+| **G-O6** | Should `skills/gaming-companion` be included in v0.1.0, or deferred? | Defer to a post-v0 release — it is a content asset, not a mechanism, and it widens review surface |
+| **G-O7** | License | MIT, if published |
+| **G-O8** | Should the package also work under an RPC host (IDE-style client)? | Not in v0.1.0; note the `setStatus` limitation in the README instead |
 
 ---
 
-## 16. Review Checklist
+## 15. Review Checklist
 
-Please confirm or correct before development begins:
+Before development starts, confirm:
 
-1. **§9 scope** — offline / single-player / PvE only, with an advisory (not blocking) competitive-title warning. Is `warn` the right default, or do you want `block`?
-2. **§6.9 context budget** — 12,000-token soft threshold, 250-word digest, 6 verbatim exchanges, 1 retained frame. Tune, or leave on defaults?
-3. **§6.8 persistence** — conversations stored as plain JSON under `%APPDATA%\sidekick\sessions\`, 50 sessions retained, `/new` archives. Comfortable with plaintext, or DPAPI by default (D15)?
-4. **§6.7 model choice** — `gpt-6-luna` default, cost-sorted picker, and `gpt-6.1-sol` pricing still to be verified in M4 (D11). Want a different default?
-5. **§6.10 commands** — is the slash-command surface right, and is `/export` (clipboard / `.md`) acceptable as the only data-exit path?
-6. **§13 milestones** — is M0–M7 the right order, or should sessions/compaction ship earlier?
-7. **Repo** — the git repo is on `main` with placeholder identity `Sidekick Dev <dev@sidekick.local>`. Replace it with your real identity before the first commit?
-8. **Anything missing** — features, constraints, or hardware/OS realities I have not accounted for.
+- [ ] **G-D3 understood and accepted:** the capture target is a bound window, not the foreground window (§6.1.1). This is the difference between a working product and one that photographs a terminal.
+- [ ] **G-D2 accepted:** no overlay in v0.1.0. The user alt-tabs to a terminal. (§4.2, §11 R-1)
+- [ ] **G-D4 accepted:** frames are injected at the `context` event precisely so image bytes never reach disk. This is the privacy guarantee, and it is enforced by AC-GS-09.
+- [ ] §6.3.2's `context`-injection mechanism is understood to be load-bearing. If it does not work, M2 stops and the package is re-scoped.
+- [ ] Open decisions **G-O1 … G-O8** are answered.
+- [ ] The competitive-title policy (§9) is accepted as a product constraint.
+- [ ] The owner accepts that this package **cannot** become an overlay without the §11.1 upgrade (an external Tauri host driving pi over RPC).
+
+**No development starts until this document is approved.**
