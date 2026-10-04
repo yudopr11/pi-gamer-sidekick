@@ -20,7 +20,7 @@ import {
 	fitLongEdge,
 	type CropRect,
 } from "./geometry.ts";
-import { listWindows, queryWindow, resolveDisplays } from "./windowinfo.ts";
+import { captureWindow, listWindows, probeOccluders, queryWindow, resolveDisplays } from "./windowinfo.ts";
 import type { CaptureFailure, Frame, FrameRecord, SidekickState } from "./state.ts";
 import { formatSize } from "./state.ts";
 
@@ -113,24 +113,46 @@ export async function captureFrame(state: SidekickState, reason: string): Promis
 	}
 
 	// --- GRAB ----------------------------------------------------------------
-	const screenshot = await loadScreenshot();
-	if (!screenshot) {
-		return { ok: false, failure: { kind: "disabled", reason: "screenshot-desktop unavailable" }, elapsedMs: Date.now() - started };
-	}
+	// Ask the window to draw itself before grabbing the display. Cropping a
+	// full-desktop shot records whatever is on top of the game, and for this
+	// package that is always the terminal holding the conversation — so half of
+	// every frame used to be pi. PrintWindow is the only way through an occluder.
+	const pipeline = (await import("sharp")).default;
+	let full: Buffer | null = await captureWindow(binding.hwnd);
+	/** Window titles sitting on top of the game, if we had to fall back. */
+	let coveredBy: string[] = [];
 
-	let full: Buffer;
-	try {
-		full = await screenshot({ screen: displayIndex });
-	} catch (error) {
-		return {
-			ok: false,
-			failure: { kind: "disabled", reason: `screen capture failed: ${describe(error)}` },
-			elapsedMs: Date.now() - started,
+	if (full && (await isBlack(full))) full = null;
+
+	if (full) {
+		// Already exactly the window. Cropping to the display rect would cut off
+		// the very part the window capture just recovered.
+		const shot = await pipeline(full).metadata();
+		rect = {
+			left: 0,
+			top: 0,
+			width: shot.width ?? bounds.width,
+			height: shot.height ?? bounds.height,
 		};
+	} else {
+		const screenshot = await loadScreenshot();
+		if (!screenshot) {
+			return { ok: false, failure: { kind: "disabled", reason: "screenshot-desktop unavailable" }, elapsedMs: Date.now() - started };
+		}
+		try {
+			full = await screenshot({ screen: displayIndex });
+		} catch (error) {
+			return {
+				ok: false,
+				failure: { kind: "disabled", reason: `screen capture failed: ${describe(error)}` },
+				elapsedMs: Date.now() - started,
+			};
+		}
+		// The model cannot know something is missing, so the caption has to say so.
+		coveredBy = await probeOccluders(binding.hwnd);
 	}
 
 	// --- CROP / SCALE / ENCODE ----------------------------------------------
-	const pipeline = (await import("sharp")).default;
 	let encoded: Buffer;
 	try {
 		encoded = await pipeline(full)
@@ -186,6 +208,9 @@ export async function captureFrame(state: SidekickState, reason: string): Promis
 		timestamp: Date.now(),
 		pinned: false,
 		imageTokens: estimateImageTokens(size),
+		// Non-empty only when the desktop-grab fallback was used with something
+		// in the way. Travels with the metadata entry so the caption can warn.
+		coveredBy,
 	};
 	const frame: Frame = { record, data: encoded.toString("base64"), mimeType: "image/jpeg" };
 

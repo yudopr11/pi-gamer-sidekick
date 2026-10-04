@@ -31,3 +31,6 @@ secret.bin
 !.vscode/extensions.json
 .DS_Store
 Thumbs.db
+
+# local probe scratch
+.scratch/

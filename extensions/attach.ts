@@ -90,6 +90,20 @@ export function registerAttachment(
 	// --- 1. capture on submit ------------------------------------------------
 	pi.on("before_agent_start", async (event, ctx) => {
 		await state.ready;
+
+		// A session created by `/gs play` still needs its name stamped. `pi` was
+		// dead inside the withSession callback, so the name was parked on state;
+		// this handler runs on a freshly bound instance where `pi` is live again.
+		if (state.pendingSessionName) {
+			const wanted = state.pendingSessionName;
+			state.pendingSessionName = null;
+			try {
+				if (pi.getSessionName() !== wanted) pi.setSessionName(wanted);
+			} catch {
+				// Naming is cosmetic. A failure here must not cost the user a turn.
+			}
+		}
+
 		if (!state.available) return;
 
 		if (!state.binding) {

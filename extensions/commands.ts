@@ -251,9 +251,16 @@ async function cmdPlay(pi: ExtensionAPI, state: SidekickState, query: string, ct
 	});
 
 	const displayNote = display ? `display ${display.index}` : "display unknown";
-	await ensureGameSession(pi, state, ctx, identity);
-
-	ctx.ui.notify(`Capturing ${identity.exe} — "${binding.title}" ${formatSize({ width: binding.bounds.width, height: binding.bounds.height })} on ${displayNote}. Ask a question and the frame comes with it.`, "info");
+	// Everything after this runs against whichever context is current: if the
+	// game owns a session we have to replace it, and the old `pi`/`ctx` stop
+	// being valid at that instant. `finish` is therefore handed to
+	// `ensureGameSession`, which calls it on the fresh context after a switch.
+	await ensureGameSession(state, ctx, identity, (fresh: ExtensionCommandContext) => {
+		fresh.ui.notify(
+			`Capturing ${identity.exe} — "${binding.title}" ${formatSize({ width: binding.bounds.width, height: binding.bounds.height })} on ${displayNote}. Ask a question and the frame comes with it.`,
+			"info",
+		);
+	});
 }
 
 /**
@@ -261,32 +268,55 @@ async function cmdPlay(pi: ExtensionAPI, state: SidekickState, query: string, ct
  *
  * Deliberately not automatic on first bind if the player is mid-conversation:
  * starting a new session throws away context they may want. They are asked.
+ *
+ * `finish` receives a *valid* context for the session that ends up current. The
+ * captured `pi` and `ctx` are dead the moment newSession/switchSession
+ * resolves, so every post-replacement side effect has to be re-homed onto the
+ * replacement context that pi hands to `withSession`.
  */
 async function ensureGameSession(
-	pi: ExtensionAPI,
 	state: SidekickState,
 	ctx: ExtensionCommandContext,
 	identity: ReturnType<typeof gameIdentity>,
+	finish: (ctx: ExtensionCommandContext) => void,
 ): Promise<void> {
-	const current = ctx.sessionManager.getSessionName?.() ?? pi.getSessionName();
-	if (current === identity.sessionName) return;
+	// No `pi` in this signature on purpose. The read below happens before any
+	// replacement, but keeping the captured API object out of a function that
+	// outlives it removes the whole class of stale-ctx bug rather than one
+	// instance of it.
+	const current = ctx.sessionManager.getSessionName?.();
+	if (current === identity.sessionName) {
+		finish(ctx);
+		return;
+	}
 
 	const sessionDir = ctx.sessionManager.getSessionDir();
 	const existing = await findSessionFor(sessionDir, identity);
+	state.sessionSlug = identity.slug;
 
 	if (existing) {
-		state.sessionSlug = identity.slug;
-		await ctx.switchSession(existing.path);
-		ctx.ui.notify(`Resumed ${identity.exe} session (${existing.messageCount} messages).`, "info");
+		const { cancelled } = await ctx.switchSession(existing.path, {
+			withSession: async (fresh) => {
+				fresh.ui.notify(`Resumed ${identity.exe} session (${existing.messageCount} messages).`, "info");
+				finish(fresh);
+			},
+		});
+		if (!cancelled) return;
+		finish(ctx);
 		return;
 	}
 
 	if (isGameSession(current)) {
 		// Currently inside a *different* game's session — safe to leave it.
-		state.sessionSlug = identity.slug;
-		await ctx.newSession();
-		pi.setSessionName(identity.sessionName);
-		ctx.ui.notify(`Started a new ${identity.exe} session.`, "info");
+		const { cancelled } = await ctx.newSession({
+			withSession: async (fresh) => {
+				state.pendingSessionName = identity.sessionName;
+				fresh.ui.notify(`Started a new ${identity.exe} session.`, "info");
+				finish(fresh);
+			},
+		});
+		if (!cancelled) return;
+		finish(ctx);
 		return;
 	}
 
@@ -298,15 +328,20 @@ async function ensureGameSession(
 		// silently abandoning it is not.
 		{ timeout: 180_000 },
 	);
-	if (start) {
-		state.sessionSlug = identity.slug;
-		await ctx.newSession();
-		pi.setSessionName(identity.sessionName);
-	} else {
+	if (!start) {
 		// Keep talking here. Binding still works; only the isolation is lost, and
 		// the status line keeps saying so.
-		state.sessionSlug = identity.slug;
+		finish(ctx);
+		return;
 	}
+	const { cancelled } = await ctx.newSession({
+		withSession: async (fresh) => {
+			state.pendingSessionName = identity.sessionName;
+			finish(fresh);
+		},
+	});
+	if (!cancelled) return;
+	finish(ctx);
 }
 
 // ---------------------------------------------------------------------------

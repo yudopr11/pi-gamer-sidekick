@@ -119,6 +119,37 @@ export async function queryWindow(hwnd: number): Promise<WindowInfo | null> {
 }
 
 /**
+ * Photograph one window's own content as PNG bytes.
+ *
+ * The alternative — grab the whole display and crop — cannot see past anything
+ * on top, which for this package is always the terminal holding the
+ * conversation. Returns null when the window declines to render (some D3D
+ * titles do), so callers can fall back to the desktop grab rather than
+ * failing the turn.
+ */
+export async function captureWindow(hwnd: number): Promise<Buffer | null> {
+	const out = await runScript("capture-window.ps1", [String(hwnd)], 10000);
+	if (out === null || out === "null") return null;
+	try {
+		return Buffer.from(out.trim(), "base64");
+	} catch {
+		return null;
+	}
+}
+
+/** Titles of windows covering `hwnd`, sampled on a 2x2 grid. Empty = clear. */
+export async function probeOccluders(hwnd: number): Promise<string[]> {
+	const out = await runScript("occluders.ps1", [String(hwnd)], 10000);
+	if (out === null) return [];
+	try {
+		const parsed: unknown = JSON.parse(out);
+		return Array.isArray(parsed) ? parsed.filter((t): t is string => typeof t === "string") : [];
+	} catch {
+		return [];
+	}
+}
+
+/**
  * Every display's pixel bounds, indexed for `screenshot-desktop`.
  *
  * The shim returns .NET `DeviceName`s (`\\.\DISPLAY1`); screenshot-desktop

@@ -46,6 +46,11 @@ export interface FrameRecord {
 	pinned: boolean;
 	/** Estimated OpenAI vision tokens for this frame. */
 	imageTokens: number;
+	/**
+	 * Titles of windows sitting on top of the game when this frame was taken.
+	 * Empty or absent means the window captured itself cleanly.
+	 */
+	coveredBy?: string[];
 }
 
 /** An in-memory frame. Never persisted, never written to disk (INV-2). */
@@ -105,6 +110,14 @@ export interface SidekickState {
 	lastError: string | null;
 	/** Slug of the game this session is bound to, for session-switch detection. */
 	sessionSlug: string | null;
+	/**
+	 * Session name to stamp on the next turn, set when a game session is created.
+	 *
+	 * Naming needs `pi.setSessionName`, and `pi` is dead inside the
+	 * `withSession` callback — so the name is parked here and applied on the
+	 * next `before_agent_start`, which runs on a freshly bound instance.
+	 */
+	pendingSessionName: string | null;
 }
 
 export function createState(): SidekickState {
@@ -125,6 +138,7 @@ export function createState(): SidekickState {
 		promptHintShown: false,
 		lastError: null,
 		sessionSlug: null,
+		pendingSessionName: null,
 	};
 }
 
