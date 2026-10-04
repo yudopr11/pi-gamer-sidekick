@@ -5,7 +5,8 @@
  *
  * Why a slug and not just the exe name: two installs of `eldenring.exe`
  * (Steam + pirated, or two library folders) are different games with different
- * builds. They must not share a conversation. §6.1.3 of the PRD.
+ * builds. Windows recycles HWNDs, so the stored handle cannot identify the game
+ * across a restart — the slug can. It is what a binding entry is keyed on. §6.1.3.
  */
 
 import { createHash } from "node:crypto";
@@ -49,18 +50,4 @@ export function gameIdentity(ownerPath: string): GameIdentity {
 function basename(p: string): string {
 	const parts = p.split(/[\\/]/).filter(Boolean);
 	return parts.length > 0 ? (parts[parts.length - 1] as string) : "";
-}
-
-/**
- * Does `query` look like it names this executable?
- *
- * Accepts `eldenring`, `eldenring.exe`, `ELDENRING.EXE`, and
- * `C:\Games\eldenring.exe`. Used by `/gs play <exe>` to skip the picker.
- */
-export function matchesExe(identity: GameIdentity, query: string): boolean {
-	const q = query.trim().toLowerCase();
-	if (!q) return false;
-	if (q === identity.exe) return true;
-	if (q === identity.exe.replace(/\.exe$/, "")) return true;
-	return basename(q) === identity.exe;
 }

@@ -9,15 +9,13 @@
 import type { GameIdentity } from "./identity.ts";
 import type { SidekickState } from "./state.ts";
 
-export const PROMPT_SECTION = "gamer-sidekick";
-
 /**
  * Build the section, or `null` when nothing is bound.
  *
  * Returned as `null` rather than an empty string so the caller can skip the
  * rewrite entirely and leave the transcript byte-identical.
  */
-export function buildGamingPrompt(state: SidekickState): string | null {
+function buildGamingPrompt(state: SidekickState): string | null {
 	const binding = state.binding;
 	if (!state.available || !binding) return null;
 

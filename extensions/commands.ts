@@ -3,7 +3,7 @@
  *
  * One command with subcommands, not twelve commands. Slash commands are cheap
  * in pi but each one costs the user a name to remember; `/gs play` and
- * `/gs play` are the same muscle memory.
+ * `/gs status` are the same muscle memory.
  */
 
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
@@ -154,7 +154,7 @@ async function cmdSetup(state: SidekickState, ctx: ExtensionCommandContext): Pro
 	);
 
 	if (state.binding) {
-		const outcome = await captureFrame(state, "setup");
+		const outcome = await captureFrame(state);
 		checks.push(
 			outcome.ok
 				? `✓ capture works (${outcome.frame.record.width}x${outcome.frame.record.height}, ${(outcome.frame.record.bytes / 1024) | 0}KB, ${outcome.elapsedMs}ms)`
@@ -182,8 +182,6 @@ function cmdFrames(state: SidekickState, ctx: ExtensionCommandContext): void {
 	const older = state.frameLog.length > 10 ? `\n…and ${state.frameLog.length - 10} earlier.` : "";
 	ctx.ui.notify(`Frames in this conversation (${state.frameLog.length}):\n${rows.join("\n")}${older}`, "info");
 }
-
-
 
 // ---------------------------------------------------------------------------
 // /gs play — the binding flow (PRD §6.1)
@@ -281,8 +279,6 @@ function cmdUnbind(state: SidekickState, ctx: ExtensionCommandContext): void {
 	ctx.ui.notify(`Stopped capturing ${name}.`, "info");
 }
 
-
-
 function cmdDisplay(state: SidekickState, arg: string, ctx: ExtensionCommandContext): void {
 	if (!state.binding) {
 		ctx.ui.notify("Bind a window first with /gs play.", "warning");
@@ -297,5 +293,3 @@ function cmdDisplay(state: SidekickState, arg: string, ctx: ExtensionCommandCont
 	state.binding.displayOverride = n;
 	ctx.ui.notify(`Capturing display ${n}.`, "info");
 }
-
-// ---------------------------------------------------------------------------

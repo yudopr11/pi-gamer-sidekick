@@ -53,15 +53,9 @@ export function registerTools(pi: ExtensionAPI, state: SidekickState): void {
 			"Prefer the automatically attached frame over calling game_frame — call it when the attached frame is stale or you need to look at something the player did not ask about.",
 		],
 		annotations: { readOnlyHint: true, openWorldHint: false },
-		parameters: Type.Object({
-			reason: Type.Optional(
-				Type.String({
-					description: "Why you are grabbing this frame. Appears in the capture log.",
-				}),
-			),
-		}),
+		parameters: Type.Object({}),
 
-		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+		async execute(_toolCallId, _params, _signal, _onUpdate, _ctx) {
 			const gate = await activeTool(state);
 			if (!gate.active) {
 				return {
@@ -70,7 +64,7 @@ export function registerTools(pi: ExtensionAPI, state: SidekickState): void {
 				};
 			}
 
-			const outcome = await captureFrame(state, params.reason ?? "model requested");
+			const outcome = await captureFrame(state);
 			if (!outcome.ok) {
 				const reason = describeFailure(outcome.failure);
 				// A missing frame is information, not a crash. The model should tell
@@ -135,7 +129,7 @@ export function registerTools(pi: ExtensionAPI, state: SidekickState): void {
 						type: "text",
 						text:
 							`Bound window: ${b.identity.exe} "${b.title}" ${b.bounds.width}x${b.bounds.height} on display ${details.displayIndex}. ` +
-							`${state.framesCaptured} frame(s) captured this session.`,
+							`${state.framesCaptured} frame(s) captured in this conversation.`,
 					},
 				],
 				details,

@@ -24,7 +24,7 @@ import { gameIdentity, type GameIdentity } from "./identity.ts";
 import type { SidekickState } from "./state.ts";
 import { displayFor, isPickableWindow, listWindows, resolveDisplays } from "./windowinfo.ts";
 
-/** Diagnostic entry type. Safe to persist: contains no pixel data. */
+/** Entry type for a stored binding. Contains no pixel data. */
 export const BINDING_ENTRY = "gamer_sidekick_binding";
 
 export interface StoredBinding {

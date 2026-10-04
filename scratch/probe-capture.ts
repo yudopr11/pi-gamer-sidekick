@@ -15,7 +15,7 @@ import sharp from "sharp";
 import { captureFrame } from "../extensions/capture.ts";
 import { gameIdentity } from "../extensions/identity.ts";
 import { createState, type Binding } from "../extensions/state.ts";
-import { listWindows, queryWindow, resolveDisplays, isPickableWindow } from "../extensions/windowinfo.ts";
+import { displayFor, listWindows, queryWindow, resolveDisplays, isPickableWindow } from "../extensions/windowinfo.ts";
 
 const t0 = Date.now();
 const log = (...a: unknown[]) => console.log(...a);
@@ -53,9 +53,8 @@ const binding: Binding = {
 	identity: gameIdentity(target.owner.path),
 	title: live.title,
 	bounds: live.bounds,
-	display: displays?.displays.find((d) => d.index === live.displayIndex) ?? displays?.displays[0] ?? null,
+	display: displayFor(displays?.displays ?? [], live.bounds),
 	boundAt: new Date().toISOString(),
-	follow: false,
 	displayOverride: null,
 };
 log(`\nidentity: ${JSON.stringify(binding.identity)}`);
@@ -65,7 +64,7 @@ state.available = true;
 state.binding = binding;
 
 log("\n── capturing ──");
-const outcome = await captureFrame(state, "probe");
+const outcome = await captureFrame(state);
 if (!outcome.ok) {
 	log(`  FAILED: ${JSON.stringify(outcome.failure)}`);
 	process.exit(1);

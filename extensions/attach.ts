@@ -32,11 +32,10 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { captureFrame } from "./capture.ts";
 import { restoreBinding } from "./binding.ts";
 import { captionFor } from "./frames.ts";
-import { rehydrateLedger } from "./ledger.ts";
-import { formatSize, toRecord, type Frame, type SidekickState } from "./state.ts";
+import { FRAME_ENTRY, rehydrateLedger } from "./ledger.ts";
+import { formatSize, type Frame, type SidekickState } from "./state.ts";
 
-/** Custom message / entry type for frames. Metadata plus the image itself. */
-export const FRAME_ENTRY = "gamer_sidekick_frame";
+export { FRAME_ENTRY };
 
 /** The message shape `before_agent_start` returns. */
 export interface FrameMessage {
@@ -103,7 +102,7 @@ export function registerAttachment(
 			return;
 		}
 
-		const outcome = await capture(state, "prompt");
+		const outcome = await capture(state);
 		state.pendingFrame = outcome.ok ? outcome.frame : null;
 
 		if (!outcome.ok) {
@@ -116,8 +115,8 @@ export function registerAttachment(
 
 		state.framesAttached++;
 		// Metadata entry alongside the image, so `/gs frames` and `/gs status`
-		// have a ledger without re-reading the transcript.
-		pi.appendEntry(FRAME_ENTRY, { ...toRecord(outcome.frame), reason: "prompt" });
+		// have a ledger to rehydrate from on the next process.
+		pi.appendEntry(FRAME_ENTRY, { ...outcome.frame.record, reason: "prompt" });
 
 		return { message: buildFrameMessage(outcome.frame) };
 	});
@@ -136,8 +135,6 @@ export function describeFailure(failure: { kind: string; reason?: string }): str
 			return "bound window is not on a known display";
 		case "black-frame":
 			return "capture returned a black frame — the game may be in exclusive fullscreen";
-		case "no-display":
-			return "no display geometry available";
 		case "disabled":
 			return failure.reason ?? "capture is unavailable";
 		default:

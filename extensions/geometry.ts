@@ -72,25 +72,6 @@ export function cropRectFor(
 }
 
 /**
- * Which display contains a window's centre point?
- *
- * `screenshot-desktop.listDisplays()` returns no bounds, so display geometry is
- * resolved once at bind time and cached. This is the lookup used at bind time
- * and again if a window migrates between displays at runtime. §6.2.3.
- */
-export function displayForWindow(
-	windowBounds: { x: number; y: number; width: number; height: number },
-	displays: { index: number; x: number; y: number; width: number; height: number }[],
-): { index: number; x: number; y: number; width: number; height: number } | null {
-	const cx = windowBounds.x + windowBounds.width / 2;
-	const cy = windowBounds.y + windowBounds.height / 2;
-	for (const d of displays) {
-		if (cx >= d.x && cx < d.x + d.width && cy >= d.y && cy < d.y + d.height) return d;
-	}
-	return null;
-}
-
-/**
  * OpenAI vision token estimate for an image.
  *
  * Images are tiled into 512px squares, each costing 85 tokens, plus a fixed

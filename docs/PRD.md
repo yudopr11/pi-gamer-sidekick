@@ -5,10 +5,10 @@
 | Field | Value |
 | --- | --- |
 | Product | **Gamer Sidekick** (was: Sidekick) |
-| Version | **0.1.0 (Draft for review)** |
+| Version | **0.1.0** (built and running) |
 | Package | `pi-gamer-sidekick` (npm, keyword `pi-package`) |
 | Date | 2026-10-04 |
-| Status | Draft — awaiting review. **No development starts until this is approved.** |
+| Status | **Built.** §0 amendments below are the current behaviour; sections after §0 that they supersede are kept as the design history they were. |
 | Supersedes | ~~Sidekick 1.2.0 (standalone Tauri app)~~ → [`PRD-standalone-tauri.md`](./PRD-standalone-tauri.md) (**deprecated**, retained for history) |
 | Target platform | **Windows 10 1809+ / Windows 11 (x64)** |
 | Delivery form | **A pi package.** No standalone binary. No installer. No Rust. No WebView. |
@@ -177,8 +177,8 @@ Three properties make it feel like that, in priority order:
 | --- | --- | --- |
 | G1 | Ask a question about the game currently on screen and get a vision-grounded answer | AC-GS-01 |
 | G2 | The attached frame is the frame you were looking at when you pressed `Enter` | AC-GS-02 |
-| G3 | Each game process has its own persistent conversation that survives restarts | AC-GS-03 |
-| G4 | Frame bytes never touch disk | AC-GS-04 |
+| G3 | A game process has a conversation you can resume, with its binding and its frames intact | AC-GS-03 |
+| G4 | Frame bytes reach only the conversation you asked in, and only while a window is bound | AC-GS-04 |
 | G5 | Zero configuration beyond `pi install` + `/gs play` | AC-GS-05 |
 | G6 | Attach cost is bounded and visible | AC-GS-06 |
 | G7 | The package adds no meaningful idle CPU or memory to pi | AC-GS-07 |
@@ -365,6 +365,14 @@ Foreground targeting was specified here and has been removed. Re-resolving from 
 
 ### 6.3 Frame Attachment — the core mechanism
 
+#### 6.3.0 Mechanism — **REVISED by A2**
+
+§6.3.2 below argues for the request-local `context` hook. It was the right call
+at the time and it is **no longer what ships**: the player asked for frames to be
+ordinary conversation messages, which means they are persisted and survive a
+`/resume`. Kept because the reasoning — and the cost it accepted — is the record
+of that decision.
+
 #### 6.3.1 When the frame is taken
 
 `before_agent_start` — fired after the user submits a prompt, before the agent loop, carrying `event.prompt: string` and `event.images?: ImageContent[]`.
@@ -407,7 +415,13 @@ Approximate cost at `gpt-6-luna`: a 1280px image ≈ 1,100 input tokens ≈ **$0
 
 ---
 
-### 6.4 Frame Pinning
+### 6.4 Frame Pinning — **WITHDRAWN (A2)**
+
+Superseded. A frame in the conversation is already in context on every
+following turn, which is the only thing a pin existed to do. `/gs pin`,
+`/gs pins`, `/gs unpin` and `/gs compare` are gone; see §0 A2.
+
+<details><summary>Original requirement (historical)</summary>
 
 | Command | Behaviour |
 | --- | --- |
@@ -416,7 +430,7 @@ Approximate cost at `gpt-6-luna`: a 1280px image ≈ 1,100 input tokens ≈ **$0
 | `/gs unpin [id]` | Drop one pin; `/gs unpin all` drops all |
 | `/gs compare` | Prompt template that instructs the model to compare the pinned frame(s) against the current one |
 
-Pinned frame bytes are held **in memory only**. They are **not** persisted: pins are ephemeral by design and do not survive a pi restart. This is stated in `/gs help`.
+</details>
 
 ---
 
@@ -561,13 +575,21 @@ pi-gamer-sidekick/
 ├── LICENSE
 ├── extensions/
 │   ├── index.ts              # entry: registers everything
-│   ├── binding.ts            # window binding, picker, identity (§6.1)
+│   ├── state.ts              # the one mutable object every module shares
+│   ├── binding.ts            # binding persistence + restore (§6.1)
+│   ├── windowinfo.ts         # Win32/PowerShell shim: windows, displays, capture
 │   ├── capture.ts            # pipeline + failure handling (§6.2)
-│   ├── attach.ts             # before_agent_start + context injection (§6.3)
-│   ├── frames.ts             # pinning, budgets, accounting (§6.4, §6.8)
+│   ├── attach.ts             # before_agent_start → the conversation message (§6.3)
+│   ├── ledger.ts             # metadata-only frame ledger, rebuilt on resume
+│   ├── frames.ts             # the caption the model reads (§6.3.3)
+│   ├── geometry.ts           # pure sizing/cropping/token maths (§6.2.2)
+│   ├── identity.ts           # exe path → stable per-game slug (§6.1.3)
 │   ├── commands.ts           # /gs command surface (§6.6.1)
 │   ├── tools.ts              # game_frame, game_window (§6.6.2)
-│   └── prompt.ts             # system-prompt section (§6.7.2)
+│   ├── prompt.ts             # system-prompt section (§6.7.2)
+│   └── win/                  # C# P/Invoke compiled once to gs_win32.dll
+├── types/
+│   └── screenshot-desktop.d.ts
 ├── skills/
 │   └── gaming-companion/
 │       └── SKILL.md          # optional: deeper domain guidance the model
@@ -575,6 +597,11 @@ pi-gamer-sidekick/
 └── prompts/
     └── gs-loadout.md         # /prompt template: "review my build"
 ```
+
+Not shipped in the tarball (`package.json` `files`): `scratch/` (live probes
+that need a running game), `test/`, `docs/`, and the compiled `gs_win32.dll` /
+`gs_win32.stamp` — a shipped DLL with a fresh stamp would stop
+`bootstrap.ps1` from ever recompiling it.
 
 ### `package.json`
 
@@ -616,14 +643,20 @@ Every API this package touches, with its verified signature. Nothing outside thi
 
 | API | Signature / shape | Used for |
 | --- | --- | --- |
-| `pi.on("before_agent_start", h)` | `(event: { prompt: string; images?: ImageContent[]; readonly systemPrompt: string; systemPromptOptions: NormalizedBuildSystemPromptOptions }, ctx) => Promise<BeforeAgentStartEventResult \| void>` | §6.3.1 capture trigger; §6.7.2 prompt section |
-| `pi.on("context", h)` | `(event: { type: "context"; messages: AgentMessage[] }, ctx) => Promise<{ messages?: AgentMessage[] } \| void>` | §6.3.2 frame injection — **request-local, not persisted** |
-| `pi.on("session_start", h)` | `(event, ctx) => void` | §6.1.2 binding validation, status line |
-| `pi.on("session_info_changed", h)` | `(event, ctx) => void` | `/gs status` refresh |
-| `pi.on("compaction_start" \| "compaction_end", h)` | session events | §6.9 status surfacing |
-| `pi.registerCommand(name, opts)` | `opts: { description?, handler: (args: string, ctx: ExtensionCommandContext) => Promise<void> }` | §6.6.1 |
-| `pi.registerTool(def)` | `def: { name, description, parameters: TSchema, exposure: "direct", annotations: { readOnlyHint: true }, execute(ctx, args, signal) => { content, details } }` | §6.6.2 |
-| `pi.appendEntry(type, data)` | `(customType: string, data?: unknown) => void` | §6.3.2 provenance metadata; §6.1.2 binding |
+| `pi.on("before_agent_start", h)` | `(event: { prompt: string; images?: ImageContent[]; readonly systemPrompt: string; systemPromptOptions: NormalizedBuildSystemPromptOptions }, ctx) => Promise<BeforeAgentStartEventResult \| void>` | §6.3.1 capture trigger; §6.7.2 prompt section; tool gating |
+| `pi.on("session_start", h)` | `(event, ctx) => Promise<void>` | binding restore, ledger rehydrate, status line |
+| `pi.on("turn_end", h)` | `(event, ctx) => Promise<void>` | status line refresh |
+| `ctx.ui` | `setStatus(key, text)`, `notify(message, level)`, `select(title, options, opts)`, `confirm(message, opts)` | §6.6.3 status line; the `/gs play` picker |
+| `ctx.getSystemPrompt()` | `() => string` | §6.7.2 prompt section, idempotence check |
+| `ctx.sessionManager.getEntries()` | `() => SessionEntry[]` (typed `ReadonlySessionManager`, which hides `appendCustomEntry` — see binding.ts) | binding restore, ledger rehydrate |
+| `pi.registerCommand(name, opts)` | `opts: { description, getArgumentCompletions?(prefix), handler: (args: string, ctx: ExtensionCommandContext) => Promise<void> }` | §6.6.1 |
+| `pi.registerTool(def)` | `def: { name, label, description, promptSnippet, promptGuidelines?, annotations, parameters: TSchema, execute(toolCallId, params, signal, onUpdate, ctx) => { content, details } }` | §6.6.2 |
+| `pi.getActiveTools()` / `pi.setActiveTools(names)` | `(names?: string[]) => void` — read-modify-write so other extensions' tools survive | §6.6.2 tool gating |
+| `pi.appendEntry(type, data)` | `(customType: string, data?: unknown) => void` | §6.3.2 frame metadata; §6.1.2 binding |
+
+Removed after A1/A2: `pi.on("context", …)` (frame injection moved into
+`before_agent_start`), `pi.on("session_info_changed", …)` and
+`pi.on("compaction_start"/"compaction_end", …)` (never needed).
 | `pi.setSessionName(name)` | `(name: string) => void` | §6.5.2 |
 | `pi.getSessionName()` | `() => string \| undefined` | §6.5.3 |
 | `pi.getSettings()` | `() => Settings` | reading user preferences |

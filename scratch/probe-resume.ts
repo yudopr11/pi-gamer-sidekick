@@ -34,7 +34,17 @@ interface Ev {
 	text?: string;
 }
 
-function run(): { send: (p: Record<string, unknown>) => Promise<Ev>; settle: () => Promise<void>; kill: () => void; events: Ev[] } {
+interface Run {
+	send(payload: Record<string, unknown>): Promise<Ev>;
+	settle(): Promise<void>;
+	kill(): void;
+	events: Ev[];
+	statuses: string[];
+	notices: string[];
+	assistants: string[];
+}
+
+function run(): Run {
 	const child = spawn(process.execPath, [LAUNCHER, "--mode", "rpc", "--session-dir", SESSION_DIR], { stdio: ["pipe", "pipe", "pipe"] });
 	const pending = new Map<string, (e: Ev) => void>();
 	const events: Ev[] = [];
@@ -93,6 +103,7 @@ function run(): { send: (p: Record<string, unknown>) => Promise<Ev>; settle: () 
 		events,
 		statuses,
 		notices,
+		assistants,
 	};
 }
 

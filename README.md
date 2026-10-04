@@ -49,10 +49,11 @@ window" approach would photograph a text editor. Sidekick therefore binds a
 specific window handle and re-validates it before every capture. If you switch
 games, run `/gs play` again.
 
-Frames are injected at pi's `context` event rather than by rewriting your
-message. `context` is request-local — pi restores conversation state immediately
-after — so the images never reach the session file. Your transcripts on disk
-carry frame metadata only: id, size, byte count, token cost, timestamp.
+Frames are attached at `before_agent_start` and returned as an ordinary
+conversation message, so pi stores them in the session file and hands them back
+to the model on later turns and after a `/resume`. A separate metadata entry
+records the size, token cost and hash for `/gs frames` and `/gs status`, without
+duplicating the image.
 
 ## Commands
 
@@ -116,13 +117,22 @@ the bound window, no pixels. Both stay dormant until a window is bound.
 
 ```
 npm install
-npm run check   # tsc --noEmit
+npm run check   # tsc --noEmit, extensions + tests + scratch
 npm test        # node:test
 ```
 
-`scratch/probe-capture.ts` is a standalone end-to-end check: enumerate, bind,
-query, capture, and write one JPEG to your temp directory. Run it with
-`node --experimental-strip-types scratch/probe-capture.ts`.
+`scratch/` holds three live probes that drive a real pi process against a real
+game window. They need a game running, so they are not part of `npm test`:
+
+| Probe | Question it answers |
+| --- | --- |
+| `probe-capture.ts` | Does the capture pipeline work at all here? No pi needed. |
+| `probe-conversation.ts` | Does the frame land in the conversation as a real message? |
+| `probe-resume.ts` | Does the frame come back after `/resume`, and do the counters agree? |
+
+```
+node --experimental-strip-types scratch/probe-capture.ts
+```
 
 ## License
 

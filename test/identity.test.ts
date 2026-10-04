@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { gameIdentity, matchesExe } from "../extensions/identity.ts";
+import { gameIdentity } from "../extensions/identity.ts";
 
 test("derives the exe basename and lowercases it", () => {
 	const id = gameIdentity("C:\\Program Files (x86)\\Steam\\steamapps\\common\\ELDEN RING\\Game\\eldenring.exe");
@@ -44,15 +44,4 @@ test("empty session name is never produced", () => {
 	for (const p of ["", "/", "\\\\", "   ", "C:\\\\"]) {
 		const id = gameIdentity(p);
 	}
-});
-
-test("matchesExe accepts bare name, full name, and full path", () => {
-	const id = gameIdentity("C:\\Steam\\eldenring.exe");
-	assert.ok(matchesExe(id, "eldenring"));
-	assert.ok(matchesExe(id, "eldenring.exe"));
-	assert.ok(matchesExe(id, "ELDENRING.EXE"));
-	assert.ok(matchesExe(id, "C:\\Other\\eldenring.exe"));
-	assert.ok(!matchesExe(id, "cyberpunk2077"));
-	assert.ok(!matchesExe(id, ""));
-	assert.ok(!matchesExe(id, "ring"));
 });

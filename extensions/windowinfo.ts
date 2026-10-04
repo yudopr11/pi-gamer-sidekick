@@ -150,20 +150,12 @@ export async function probeOccluders(hwnd: number): Promise<string[]> {
 }
 
 /**
- * Every display's pixel bounds, indexed for `screenshot-desktop`.
- *
- * The shim returns .NET `DeviceName`s (`\\.\DISPLAY1`); screenshot-desktop
- * indexes displays positionally and only exposes a name for `listDisplays()`.
- * Matching by name is what makes `--screen 1` mean the monitor next to the
- * primary one rather than "whatever happens to be second".
- *
- * Returns null if PowerShell is unavailable or the mapping is ambiguous.
- */
-/**
  * The display a window sits on, or null when its centre is off-screen.
  *
  * Positional: `screenshot-desktop` indexes displays, so a window spanning two
  * monitors must resolve to the one holding its centre or the crop is wrong.
+ * Display geometry is resolved once at bind time and cached on the binding, so
+ * this runs at bind time and again only if a window migrates at runtime.
  */
 export function displayFor<T extends { index: number; x: number; y: number; width: number; height: number }>(
 	displays: T[],
@@ -177,6 +169,16 @@ export function displayFor<T extends { index: number; x: number; y: number; widt
 	return null;
 }
 
+/**
+ * Every display's pixel bounds, indexed for `screenshot-desktop`.
+ *
+ * The shim returns .NET `DeviceName`s (`\\.\DISPLAY1`); screenshot-desktop
+ * indexes displays positionally and only exposes a name for `listDisplays()`.
+ * Matching by name is what makes `--screen 1` mean the monitor next to the
+ * primary one rather than "whatever happens to be second".
+ *
+ * Returns null if PowerShell is unavailable or the mapping is ambiguous.
+ */
 export async function resolveDisplays(): Promise<{ displays: DisplayInfo[]; warning?: string } | null> {
 	const out = await runScript("screens.ps1");
 	if (out === null) return null;

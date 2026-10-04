@@ -2,12 +2,11 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
 	cropRectFor,
-	displayForWindow,
 	estimateImageTokens,
 	fitLongEdge,
 	MAX_LONG_EDGE,
 } from "../extensions/geometry.ts";
-import { filterWindows, type WindowInfo } from "../extensions/windowinfo.ts";
+import { displayFor, filterWindows, type WindowInfo } from "../extensions/windowinfo.ts";
 
 function win(name: string, title: string, width: number, height: number): WindowInfo {
 	return {
@@ -98,12 +97,12 @@ test("display is chosen by the window centre point", () => {
 		{ index: 0, x: 0, y: 0, width: 1920, height: 1080 },
 		{ index: 1, x: 1920, y: 0, width: 2560, height: 1440 },
 	];
-	assert.equal(displayForWindow({ x: 1925, y: 100, width: 800, height: 600 }, displays)?.index, 1);
-	assert.equal(displayForWindow({ x: 10, y: 10, width: 800, height: 600 }, displays)?.index, 0);
+	assert.equal(displayFor(displays, { x: 1925, y: 100, width: 800, height: 600 })?.index, 1);
+	assert.equal(displayFor(displays, { x: 10, y: 10, width: 800, height: 600 })?.index, 0);
 });
 
 test("display is null when the window straddles nothing it centres on", () => {
-	assert.equal(displayForWindow({ x: 5000, y: 0, width: 100, height: 100 }, [{ index: 0, x: 0, y: 0, width: 1920, height: 1080 }]), null);
+	assert.equal(displayFor([{ index: 0, x: 0, y: 0, width: 1920, height: 1080 }], { x: 5000, y: 0, width: 100, height: 100 }), null);
 });
 
 test("image token estimate uses 512px tiles plus a base", () => {

@@ -20,10 +20,9 @@ import {
 	fitLongEdge,
 	type CropRect,
 } from "./geometry.ts";
-import { captureWindow, probeOccluders, queryWindow, resolveDisplays } from "./windowinfo.ts";
+import { captureWindow, displayFor, probeOccluders, queryWindow, resolveDisplays } from "./windowinfo.ts";
 import { recordFrame } from "./ledger.ts";
 import type { CaptureFailure, Frame, FrameRecord, SidekickState } from "./state.ts";
-import { formatSize } from "./state.ts";
 
 export type CaptureOutcome = { ok: true; frame: Frame; elapsedMs: number } | { ok: false; failure: CaptureFailure; elapsedMs: number };
 
@@ -52,12 +51,8 @@ async function loadScreenshot(): Promise<ScreenshotDesktop | null> {
 
 /**
  * Capture the bound window's current frame.
- *
- * `reason` is recorded for provenance only — it distinguishes the automatic
- * capture taken when the user pressed Enter from a model-initiated refresh
- * (`game_frame` tool).
  */
-export async function captureFrame(state: SidekickState, reason: string): Promise<CaptureOutcome> {
+export async function captureFrame(state: SidekickState): Promise<CaptureOutcome> {
 	const started = Date.now();
 
 	if (!state.available) {
@@ -79,7 +74,6 @@ export async function captureFrame(state: SidekickState, reason: string): Promis
 		return { ok: false, failure: { kind: "minimized" }, elapsedMs: Date.now() - started };
 	}
 	const bounds = live.bounds;
-	const title = live.title;
 
 	// --- DISPLAY -------------------------------------------------------------
 	const displayIndex = binding.displayOverride ?? binding.display?.index ?? 0;
@@ -89,7 +83,7 @@ export async function captureFrame(state: SidekickState, reason: string): Promis
 		// The window migrated to another display. Re-resolve exactly once, then
 		// give up rather than loop. (PRD §6.2.3)
 		const resolved = await resolveDisplays();
-		const match = resolved ? pickDisplay(resolved.displays, bounds) : null;
+		const match = resolved ? displayFor(resolved.displays, bounds) : null;
 		if (!match) return { ok: false, failure: { kind: "off-display" }, elapsedMs: Date.now() - started };
 		binding.display = match;
 		binding.displayOverride = null;
@@ -203,24 +197,7 @@ export async function captureFrame(state: SidekickState, reason: string): Promis
 	pruneFrames(state);
 	state.lastError = null;
 
-	// Provenance metadata only. The base64 payload above never leaves this
-	// function. (INV-2, PRD §6.3.2)
-	void reason;
-	void title;
-
 	return { ok: true, frame, elapsedMs: Date.now() - started };
-}
-
-function pickDisplay<T extends { index: number; x: number; y: number; width: number; height: number }>(
-	displays: T[],
-	bounds: { x: number; y: number; width: number; height: number },
-): T | null {
-	const cx = bounds.x + bounds.width / 2;
-	const cy = bounds.y + bounds.height / 2;
-	for (const d of displays) {
-		if (cx >= d.x && cx < d.x + d.width && cy >= d.y && cy < d.y + d.height) return d;
-	}
-	return null;
 }
 
 /** Mean luminance of the red channel; below ~2/255 the frame is effectively black. */
@@ -251,5 +228,3 @@ function describe(error: unknown): string {
 	if (error instanceof Error) return error.message;
 	return String(error);
 }
-
-export { CAPTURE_BUDGET_MS, formatSize };

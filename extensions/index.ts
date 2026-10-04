@@ -13,20 +13,20 @@
  *      loads the package and can run `/gs setup` to find out why.
  *   2. Never block the game. Capture happens after the user pressed Enter,
  *      never on a timer, never in the foreground process's hot path.
- *   3. Never touch the user's disk with pixels. See extensions/attach.ts.
+ *   3. Never write pixels anywhere the player did not ask for. A frame ends up
+ *      in the conversation — which means in the session file — because that is
+ *      what makes it survive a `/resume`. See extensions/attach.ts.
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerAttachment, statusText } from "./attach.ts";
 import { appendBinding, restoreBinding } from "./binding.ts";
-import type { GameIdentity } from "./identity.ts";
 import { rehydrateLedger } from "./ledger.ts";
 import { registerCommands } from "./commands.ts";
 import { withGamingSection } from "./prompt.ts";
 import { createState, type SidekickState } from "./state.ts";
 import { probeCaptureSupport } from "./windowinfo.ts";
 
-/** Diagnostic entry: safe to `appendEntry`, contains no pixel data. */
 export default function gamerSidekick(pi: ExtensionAPI): void {
 	const state: SidekickState = createState();
 
@@ -49,7 +49,7 @@ export default function gamerSidekick(pi: ExtensionAPI): void {
 		if (!state.available || !state.binding) return;
 
 		const base = ctx.getSystemPrompt();
-		if (base === event.systemPrompt && includesGamingSection(base)) return;
+		if (includesGamingSection(base)) return;
 
 		return { systemPrompt: withGamingSection(event.systemPrompt, state) };
 	});
@@ -111,5 +111,3 @@ async function probe(state: SidekickState): Promise<void> {
 function includesGamingSection(prompt: string): boolean {
 	return prompt.includes("## Gaming companion");
 }
-
-export { BINDING_ENTRY } from "./binding.ts";

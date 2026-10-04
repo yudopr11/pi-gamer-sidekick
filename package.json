@@ -16,6 +16,16 @@
     "test": "node --test --experimental-strip-types \"test/*.test.ts\"",
     "check": "tsc --noEmit"
   },
+  "files": [
+    "extensions",
+    "prompts",
+    "skills",
+    "types",
+    "README.md",
+    "LICENSE",
+    "!extensions/win/*.dll",
+    "!extensions/win/*.stamp"
+  ],
   "dependencies": {
     "screenshot-desktop": "^1.15.6",
     "sharp": "^0.33.0"

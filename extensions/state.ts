@@ -50,7 +50,11 @@ export interface FrameRecord {
 	coveredBy?: string[];
 }
 
-/** An in-memory frame. Never persisted, never written to disk (INV-2). */
+/**
+ * An in-memory frame, held only so `/gs frames` and `/gs status` have a recent
+ * tail to show. The durable copy is the custom message in the conversation
+ * (see attach.ts), which is what keeps the frame alive across a `/resume`.
+ */
 export interface Frame {
 	record: FrameRecord;
 	/** base64 JPEG, ready to become an ImageContent. */
@@ -65,7 +69,6 @@ export type CaptureFailure =
 	| { kind: "minimized" }
 	| { kind: "off-display" }
 	| { kind: "black-frame" }
-	| { kind: "no-display" }
 	| { kind: "disabled"; reason: string };
 
 export interface SidekickState {
@@ -88,7 +91,7 @@ export interface SidekickState {
 	/** True while the binding has been found stale at session start. */
 	bindingStale: boolean;
 
-	/** Captured this session. Bounded; see pruneFrames in capture.ts. */
+	/** Recent frames held in this process, pruned to a short tail. See ledger.ts. */
 	frames: Frame[];
 	nextFrameId: number;
 
@@ -133,16 +136,6 @@ export function createState(): SidekickState {
 		promptHintShown: false,
 		lastError: null,
 	};
-}
-
-/** Find a captured frame by id. */
-export function findFrame(state: SidekickState, id: number): Frame | undefined {
-	return state.frames.find((f) => f.record.id === id);
-}
-
-/** Metadata only — safe to hand to `pi.appendEntry`. */
-export function toRecord(frame: Frame): FrameRecord {
-	return frame.record;
 }
 
 /** Compact human-readable size for the status line. */

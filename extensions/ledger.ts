@@ -22,8 +22,8 @@
 
 import type { FrameRecord, SidekickState } from "./state.ts";
 
-/** Matches `FRAME_ENTRY`; duplicated to keep this module free of the capture path. */
-const FRAME_ENTRY = "gamer_sidekick_frame";
+/** Matches the custom message / entry type frames are stored under. */
+export const FRAME_ENTRY = "gamer_sidekick_frame";
 
 /** Ledger size. Older rows fall off the top; the count keeps rising. */
 const LEDGER_LIMIT = 50;
