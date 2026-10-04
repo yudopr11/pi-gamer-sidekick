@@ -107,14 +107,13 @@ Long conversations accumulate; `/compact` is the release valve.
 
 ## Your conversations are yours
 
-This package does not create, rename or switch conversations. `/resume`,
-`/rename` and `/new` behave exactly as they always do, and you decide which
-game each conversation is about.
+This package does not create, rename or switch conversations — that is pi's
+business, and you decide which game each conversation is about.
 
-A window stays bound to the conversation you bound it in — `/gs play` records
-the binding in that conversation, and resuming that conversation resumes
-capture. Start a different conversation and it starts unbound; run `/gs play`
-there when you want frames in it.
+A window is bound to the conversation you bound it in: `/gs play` records the
+binding in that conversation, and coming back to that conversation brings the
+binding with it. Start a different conversation and it starts unbound; run
+`/gs play` there when you want frames in it.
 
 ## Model tools
 

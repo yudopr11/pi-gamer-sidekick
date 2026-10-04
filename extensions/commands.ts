@@ -26,26 +26,24 @@ import {
 } from "./windowinfo.ts";
 
 const HELP = [
-	"Gamer Sidekick — capture your game window into the conversation.",
+	"Gamer Sidekick — brings the game you are playing into your conversation.",
 	"",
-	"  /gs play [exe]     pick a game window to capture",
-	"  /gs status        show what is bound and what has been captured",
-	"  /gs frames        list frames captured this conversation",
-	"  /gs display <n>   force which display to capture from",
-	"  /gs setup         check that screen capture works here",
+	"  /gs play [exe]    bind a window to capture",
+	"  /gs status        what is bound, and what has been captured",
+	"  /gs frames        frames captured in this conversation",
+	"  /gs display <n>   look for the window on display <n>",
+	"  /gs setup         check that window capture works on this machine",
 	"  /gs unbind        stop capturing",
+	"  /gs help          this list",
 	"",
-	"Conversations are yours: /resume, /rename and /new all work normally.",
-	"A window stays bound to the conversation you bound it in.",
-	"",
-	"Every message you send while a window is bound carries a frame into the",
-	"conversation, where it stays in context and survives /resume. That costs",
-	"disk — roughly 150 KB and ~600 image tokens per frame.",
+	"A binding lives in one conversation, so a new one needs its own /gs play.",
+	"While a window is bound, every message you send carries a frame of it —",
+	"about 150 KB of session file and ~600 image tokens of context per frame.",
 ].join("\n");
 
 export function registerCommands(pi: ExtensionAPI, state: SidekickState): void {
 	pi.registerCommand("gs", {
-		description: "Gamer Sidekick — capture your game window into the conversation",
+		description: "Gamer Sidekick — brings the game you are playing into your conversation",
 		getArgumentCompletions(prefix) {
 			const subs = [
 				"play", "status", "frames", "display", "setup", "unbind", "help",

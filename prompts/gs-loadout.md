@@ -25,8 +25,8 @@ by number without re-capturing anything.
 ## Notes
 
 - Conversations are the player's. This package never creates, renames or
-  switches one — use `/resume` and `/rename` as usual. Capture is bound to the
-  conversation it was set up in, so resuming that conversation resumes capture.
+  switches one — that is pi's business. Capture is bound to the conversation it
+  was set up in, so a new conversation needs its own `/gs play`.
 - The companion answers in text. It does not draw on your screen or send input to the game.
 - If the capture turns out black — usually exclusive fullscreen — the question still goes through, without the frame, and the reason is noted in the reply.
 - Intended for single-player, offline and PvE games.
