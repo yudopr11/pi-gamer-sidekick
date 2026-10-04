@@ -1,0 +1,28 @@
+# Rust / Tauri
+src-tauri/target/
+src-tauri/gen/
+
+# Node / frontend
+node_modules/
+dist/
+dist-ssr/
+
+# Runtime artifacts
+*.log
+verbose.log
+
+# Local data (never commit user sessions or secrets)
+*.session.json
+secret.bin
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Editors / OS
+.idea/
+.vscode/*
+!.vscode/extensions.json
+.DS_Store
+Thumbs.db
