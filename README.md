@@ -15,8 +15,8 @@ pi install git:github.com/yudopr11/pi-gamer-sidekick
 
 pi clones the repo, runs `npm install` for it and registers it in
 `~/.pi/agent/settings.json`. **This is the only installation you need.** The
-package has no runtime dependencies, so that install costs about 260 KB — the
-whole extension, prompt and skill — plus a 13 KB DLL it compiles on first run.
+package has no runtime dependencies, so there is no `node_modules` at all — the
+clone is about 780 KB, of which roughly 190 KB is what pi actually loads.
 Updates come with `pi update`.
 
 Verify, update, remove:
@@ -192,7 +192,7 @@ But the package already compiles a C# shim to talk to Windows, and Windows can
 already do exactly the three things `sharp` was doing here: `Graphics.DrawImage`
 to scale, an `EncoderParameters.Quality` to encode, and `LockBits` to compute the
 mean red channel that the black-frame check needs. Moving that work into the
-shim took the install from **22 MB to about 260 KB**.
+shim took the install from **22 MB to 780 KB**, with no `node_modules` at all.
 
 The reason it is worth doing is the boundary, not just the bytes. `PrintWindow`
 renders a 2560x1440 window; as a PNG that is 5.9 MB of base64 crossing out of
