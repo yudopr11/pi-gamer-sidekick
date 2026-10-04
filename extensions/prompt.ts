@@ -33,6 +33,11 @@ function buildGamingPrompt(state: SidekickState): string | null {
 		"- If no frame is attached to a message, you have no view of the game. Say what you can from what they tell you.",
 		"- Answer the question asked. Game commentary for its own sake is noise.",
 		"",
+		`If you have a web search tool, use it for facts about the game that no frame can show — item locations, ` +
+			`quest names, boss strategy, party comps, lore, what an error means. Never use it to work out what is on ` +
+			`screen: the frame is authoritative for that, and a search will happily return a screenshot of the wrong ` +
+			`version of the game. If you have no web tool, say so rather than answering from memory as if it were checked.`,
+		"",
 		`You can pull a **fresh** frame mid-answer with the \`game_frame\` tool, and inspect the bound window with \`game_window\`. ` +
 			`Earlier frames stay in the conversation, so the player can refer back to them by number.`,
 	];

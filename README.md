@@ -105,6 +105,23 @@ The cost is disk. A frame is ~150 KB of base64 in the session file, and ~595
 image tokens of context, for every message you send while a window is bound.
 Long conversations accumulate; `/compact` is the release valve.
 
+## Looking things up
+
+The frame tells you what is on screen. Web search tells you everything else —
+item recipes, quest names, map locations, boss strategy, party composition,
+lore, what a specific error means. If a package providing web search is
+installed, the companion uses it: your game questions get current, sourced
+answers instead of whatever the model happens to remember, which for a
+patched game is often wrong.
+
+It never searches for what is in the frame. Identifying a scene by looking it
+up is how you end up confidently describing a screenshot of a different version
+of the game. When a wiki and the frame disagree, the frame wins for your game
+and the companion says which one it believes.
+
+If no web tool is installed or enabled, the companion says so rather than
+answering from memory as if it had checked.
+
 ## Your conversations are yours
 
 This package does not create, rename or switch conversations — that is pi's
