@@ -11,6 +11,7 @@ import { captureFrame } from "./capture.ts";
 import { appendBinding } from "./binding.ts";
 import { describeFailure, statusText } from "./attach.ts";
 import { gameIdentity } from "./identity.ts";
+import { rehydrateLedger } from "./ledger.ts";
 import { formatSize, type Binding, type SidekickState } from "./state.ts";
 import {
 	displayFor,
@@ -37,7 +38,9 @@ const HELP = [
 	"Conversations are yours: /resume, /rename and /new all work normally.",
 	"A window stays bound to the conversation you bound it in.",
 	"",
-	"Frames are never written to disk. They exist in memory for the turn.",
+	"Every message you send while a window is bound carries a frame into the",
+	"conversation, where it stays in context and survives /resume. That costs",
+	"disk — roughly 150 KB and ~600 image tokens per frame.",
 ].join("\n");
 
 export function registerCommands(pi: ExtensionAPI, state: SidekickState): void {
@@ -56,6 +59,11 @@ export function registerCommands(pi: ExtensionAPI, state: SidekickState): void {
 			// await a command typed immediately after launch reports the package
 			// as switched off when it is only still starting up.
 			await state.ready;
+
+			// `/gs frames` and `/gs status` describe the conversation, so make
+			// them read it rather than this process's memory — otherwise they
+			// report zero in a resumed conversation that is full of frames.
+			rehydrateLedger(state, ctx.sessionManager.getEntries?.());
 
 			const [sub = "help", ...rest] = args.trim().split(/\s+/);
 			const arg = rest.join(" ");
@@ -125,7 +133,7 @@ function cmdStatus(state: SidekickState, ctx: ExtensionCommandContext): void {
 		`window    ${formatSize({ width: b.bounds.width, height: b.bounds.height })} at (${b.bounds.x}, ${b.bounds.y})  hwnd ${b.hwnd}`,
 		`display   ${b.displayOverride ?? b.display?.index ?? "?"}${b.display ? `  ${b.display.width}x${b.display.height} at (${b.display.x},${b.display.y})` : ""}`,
 		`bound     ${new Date(b.boundAt).toLocaleString()}`,
-		`frames    ${state.framesCaptured} captured · ${state.framesAttached} attached · ${state.framesDropped} dropped`,
+		`frames    ${state.framesCaptured} in this conversation · ${state.framesAttached} attached this run · ${state.framesDropped} dropped this run`,
 	];
 	if (state.lastError) lines.push(`last err  ${state.lastError}`);
 	ctx.ui.notify(lines.join("\n"), state.bindingStale ? "warning" : "info");
@@ -160,17 +168,19 @@ async function cmdSetup(state: SidekickState, ctx: ExtensionCommandContext): Pro
 }
 
 function cmdFrames(state: SidekickState, ctx: ExtensionCommandContext): void {
-	if (state.frames.length === 0) {
-		ctx.ui.notify("No frames captured this session yet.", "info");
+	// Reads the ledger, not `state.frames`: the ledger is metadata only and is
+	// rebuilt from the conversation on resume, so this lists frames the player
+	// actually has even after a restart. `state.frames` is pruned to 8 and
+	// would under-report.
+	if (state.frameLog.length === 0) {
+		ctx.ui.notify("No frames in this conversation yet. Send a message while a game is bound.", "info");
 		return;
 	}
-	const rows = state.frames
+	const rows = state.frameLog
 		.slice(-10)
-		.map((f) => {
-			const r = f.record;
-			return `#${String(r.id).padStart(3, "0")}  ${r.exe}  ${r.width}x${r.height}  ${(r.bytes / 1024).toFixed(0)}KB  ~${r.imageTokens}tok  ${new Date(r.timestamp).toLocaleTimeString()}  ${r.hash}`;
-		});
-	ctx.ui.notify(`Frames captured this session (${state.frames.length}):\n${rows.join("\n")}`, "info");
+		.map((r) => `#${String(r.id).padStart(3, "0")}  ${r.exe}  ${r.width}x${r.height}  ${(r.bytes / 1024).toFixed(0)}KB  ~${r.imageTokens}tok  ${new Date(r.timestamp).toLocaleTimeString()}  ${r.hash}`);
+	const older = state.frameLog.length > 10 ? `\n…and ${state.frameLog.length - 10} earlier.` : "";
+	ctx.ui.notify(`Frames in this conversation (${state.frameLog.length}):\n${rows.join("\n")}${older}`, "info");
 }
 
 

@@ -62,7 +62,7 @@ carry frame metadata only: id, size, byte count, token cost, timestamp.
 | `/gs play` | Pick and bind a window. |
 | `/gs unbind` | Stop capturing. |
 | `/gs status` | What is bound, whether it is still alive, frame counters. |
-| `/gs frames` | List captured frames with ids, size and token cost. |
+| `/gs frames` | List frames in this conversation with ids, size and token cost. |
 | `/gs display [n]` | Override which display the window is looked for on. |
 | `/gs help` | This list. |
 
@@ -71,9 +71,16 @@ carry frame metadata only: id, size, byte count, token cost, timestamp.
 Each time you press `Enter`, the frame lands in the transcript as an ordinary
 message with a `[FRAME #001 · …]` caption and the image beside it. That means:
 
-- you can see the frame in your scrollback, and refer to it by number later;
-- it stays in context on following turns without anything re-sending it;
-- `/resume` brings it back with the conversation.
+- the model can refer to it on every following turn without anything
+  re-sending it;
+- it survives `/resume` — pi loads it straight back into the conversation;
+- `/gs frames` and the status line count it, including frames captured in an
+  earlier process.
+
+What it does *not* mean: pi renders only the text blocks of a custom message,
+so you see the caption in your scrollback, not the picture. Asking the model to
+look again (`game_frame`, which it will do if you ask) is the way to actually
+see one — a tool result is the only thing that renders an image.
 
 The cost is disk. A frame is ~150 KB of base64 in the session file, and ~595
 image tokens of context, for every message you send while a window is bound.

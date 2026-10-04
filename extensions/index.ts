@@ -20,6 +20,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerAttachment, statusText } from "./attach.ts";
 import { appendBinding, restoreBinding } from "./binding.ts";
 import type { GameIdentity } from "./identity.ts";
+import { rehydrateLedger } from "./ledger.ts";
 import { registerCommands } from "./commands.ts";
 import { withGamingSection } from "./prompt.ts";
 import { createState, type SidekickState } from "./state.ts";
@@ -65,7 +66,12 @@ export default function gamerSidekick(pi: ExtensionAPI): void {
 
 		// Restore an earlier binding from this session's own entries, so a
 		// resumed conversation keeps capturing without re-picking the window.
-		if (await restoreBinding(state, ctx.sessionManager.getEntries?.())) {
+		// Same reason for the ledger: the frames are already in this
+		// conversation, pi is already feeding them to the model, and the count
+		// has to agree with that rather than sit at zero until the next turn.
+		const entries = ctx.sessionManager.getEntries?.();
+		rehydrateLedger(state, entries);
+		if (await restoreBinding(state, entries)) {
 			ctx.ui.notify(`Resumed capture for ${state.binding?.identity.exe}.`, "info");
 			ctx.ui.setStatus("gamer-sidekick", statusText(state));
 		}

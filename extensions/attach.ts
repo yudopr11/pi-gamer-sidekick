@@ -11,12 +11,15 @@
  *   - it reaches the model as a user message with an image block
  *     (`convertToLlm` maps `role:"custom"` onto `role:"user"`, content intact);
  *   - it is persisted, so `/resume` brings the frame back with the conversation;
- *   - it stays in context on later turns without anything re-attaching it;
- *   - and it renders in the terminal, which is why the player can see it.
+ *   - it stays in context on later turns without anything re-attaching it.
  *
- * That last point is why there is no pinning. A pin existed to force a frame
- * into context; if frames are simply in the conversation, the pin is a second
- * mechanism doing a job the transcript already does.
+ * The one thing it does not do is *render* the image in the terminal: pi's
+ * CustomMessageComponent shows the text blocks and drops the rest, for a live
+ * turn and a resumed one alike. The picture reaches the model; the player sees
+ * the caption. That is why there is no pinning — a pin existed to force a frame
+ * into context, and a frame that is simply in the conversation does that — and
+ * also why `game_frame` is still registered: it is the only path that returns
+ * an image as a tool result, and tool results do render.
  *
  * The cost is disk: a custom message is a session entry, so each captured
  * frame writes its base64 JPEG into the session JSONL. A 1280px frame is
@@ -29,6 +32,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { captureFrame } from "./capture.ts";
 import { restoreBinding } from "./binding.ts";
 import { captionFor } from "./frames.ts";
+import { rehydrateLedger } from "./ledger.ts";
 import { formatSize, toRecord, type Frame, type SidekickState } from "./state.ts";
 
 /** Custom message / entry type for frames. Metadata plus the image itself. */
@@ -76,8 +80,14 @@ export function registerAttachment(
 		// whenever a conversation is replaced, rebuilding an empty state. Re-read
 		// before anything needs a window, or this turn answers "no game bound"
 		// for a window that is very much bound.
+		//
+		// The ledger is re-read here too, for the same reason: a resumed
+		// conversation holds its frames as custom messages that pi has already
+		// handed to the model, but the counters describing them start at zero.
+		const entries = ctx.sessionManager?.getEntries?.();
+		const frames = rehydrateLedger(state, entries);
 		if (!state.binding) {
-			const identity = await restoreBinding(state, ctx.sessionManager?.getEntries?.());
+			const identity = await restoreBinding(state, entries);
 			if (identity) {
 				ctx.ui.setStatus("gamer-sidekick", statusText(state));
 				ctx.ui.notify(`Resumed capture for ${identity.exe}.`, "info");

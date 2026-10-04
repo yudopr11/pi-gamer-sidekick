@@ -21,6 +21,7 @@ import {
 	type CropRect,
 } from "./geometry.ts";
 import { captureWindow, probeOccluders, queryWindow, resolveDisplays } from "./windowinfo.ts";
+import { recordFrame } from "./ledger.ts";
 import type { CaptureFailure, Frame, FrameRecord, SidekickState } from "./state.ts";
 import { formatSize } from "./state.ts";
 
@@ -197,7 +198,7 @@ export async function captureFrame(state: SidekickState, reason: string): Promis
 	};
 	const frame: Frame = { record, data: encoded.toString("base64"), mimeType: "image/jpeg" };
 
-	state.framesCaptured++;
+	recordFrame(state, record);
 	state.frames.push(frame);
 	pruneFrames(state);
 	state.lastError = null;

@@ -92,9 +92,21 @@ export interface SidekickState {
 	frames: Frame[];
 	nextFrameId: number;
 
+	/**
+	 * Metadata for every frame this conversation holds, including frames
+	 * captured in an earlier process. `frames` above holds live base64 and is
+	 * pruned to 8; this holds `FrameRecord` rows only and keeps the last 50,
+	 * so the frame count survives a `/resume`. See ledger.ts.
+	 */
+	frameLog: FrameRecord[];
+
 	/** The frame captured for the turn currently in flight. */
 	pendingFrame: Frame | null;
 
+	/**
+	 * Total frames in this conversation, across every process that touched it.
+	 * Monotonic — trimming `frameLog` must not lower the status line.
+	 */
 	framesCaptured: number;
 	framesAttached: number;
 	framesDropped: number;
@@ -112,6 +124,7 @@ export function createState(): SidekickState {
 		binding: null,
 		bindingStale: false,
 		frames: [],
+		frameLog: [],
 		nextFrameId: 1,
 		pendingFrame: null,
 		framesCaptured: 0,

@@ -82,6 +82,31 @@ with a correct reading of the on-screen fishing minigame.
 
 **Superseded:** G-D4, INV-2, AC-GS-09, §6.3.2, §6.4 (entirely), §6.8's pin rows,
 E8, G-D5, G-O3.
+
+**Correction, same day.** The rationale above said a frame "renders in the
+terminal, which is why the player can see it". That is false and was caught by
+reading pi's `CustomMessageComponent`:
+
+```js
+this.message.content.filter(c => c.type === "text").map(c => c.text).join("")
+```
+
+Text blocks only. The picture reaches the model; the player sees the caption.
+The same renderer handles a live turn and a resumed one, so nothing regressed —
+it never rendered. Only *tool results* render images (`settings.terminal.showImages`,
+default on), and there is no extension API for injecting one, which is why
+`game_frame` is retained: it is the only path that puts a picture on screen.
+
+**Follow-up defect, same day.** `state` is rebuilt on every conversation
+replacement, so after `/resume` the status line reported `0 frames` and
+`/gs frames` said none had been captured — for a conversation pi had *already*
+loaded frames from and was feeding to the model. The images were accounted for;
+only the bookkeeping was missing. Fixed by `extensions/ledger.ts`, which rebuilds
+a metadata-only ledger (`FrameRecord` rows, last 50) from the conversation's
+custom entries at `session_start`, before each `/gs` subcommand and before each
+turn's capture. `framesCaptured` is a monotonic conversation total;
+`/gs status` splits it from the per-run attached/dropped counters so "1 in this
+conversation · 0 attached this run" is unambiguous.
 ---
 
 ## 1. What This Is — TL;DR
