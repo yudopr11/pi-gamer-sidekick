@@ -7,8 +7,29 @@ screenshot gallery, no second monitor.
 
 ## Install
 
-```
+```bash
+cd path/to/pi-gamer-sidekick
+npm install                 # sharp + screenshot-desktop; a local package is never installed by pi itself
 pi install C:\path\to\pi-gamer-sidekick
+```
+
+`pi install` writes a **local path** declaration into `~/.pi/agent/settings.json`
+(personal scope) or `.pi/settings.json` with `--local`. Nothing is copied —
+pi loads the extension, prompt and skill straight from the working tree, so
+edits take effect on the next start. Use an absolute path: a relative one
+resolves against the settings file that holds it, not against your shell.
+
+Check it, remove it:
+
+```bash
+pi list                     # confirm the package is registered
+pi remove C:\path\to\pi-gamer-sidekick
+```
+
+To try it for a single run without touching settings:
+
+```bash
+pi -e C:\path\to\pi-gamer-sidekick
 ```
 
 Then, in a session:
