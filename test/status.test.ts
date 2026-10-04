@@ -95,6 +95,20 @@ describe("status line — words", () => {
 		assert.notEqual(starting, broken);
 	});
 
+	it("uses a lowercase wordmark, not a shouting one", () => {
+		for (const state of [
+			stateWith(),
+			stateWith({ binding: BINDING }),
+			stateWith({ binding: BINDING, framesCaptured: 3, bindingStale: true }),
+			stateWith({ available: false, disabledReason: null }),
+			stateWith({ available: false, disabledReason: "boom" }),
+		]) {
+			const line = statusText(state) ?? "";
+			assert.match(line, /\bsidekick\b/);
+			assert.doesNotMatch(line, /SIDEKICK/);
+		}
+	});
+
 	it("uses a multiplication sign, not an x, for dimensions", () => {
 		const line = statusText(stateWith({ binding: BINDING })) ?? "";
 		assert.match(line, /2560×1440/);
