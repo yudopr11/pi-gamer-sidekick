@@ -159,6 +159,24 @@ export async function probeOccluders(hwnd: number): Promise<string[]> {
  *
  * Returns null if PowerShell is unavailable or the mapping is ambiguous.
  */
+/**
+ * The display a window sits on, or null when its centre is off-screen.
+ *
+ * Positional: `screenshot-desktop` indexes displays, so a window spanning two
+ * monitors must resolve to the one holding its centre or the crop is wrong.
+ */
+export function displayFor<T extends { index: number; x: number; y: number; width: number; height: number }>(
+	displays: T[],
+	bounds: { x: number; y: number; width: number; height: number },
+): T | null {
+	const cx = bounds.x + bounds.width / 2;
+	const cy = bounds.y + bounds.height / 2;
+	for (const d of displays) {
+		if (cx >= d.x && cx < d.x + d.width && cy >= d.y && cy < d.y + d.height) return d;
+	}
+	return null;
+}
+
 export async function resolveDisplays(): Promise<{ displays: DisplayInfo[]; warning?: string } | null> {
 	const out = await runScript("screens.ps1");
 	if (out === null) return null;

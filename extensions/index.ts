@@ -18,14 +18,14 @@
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerAttachment, statusText } from "./attach.ts";
+import { appendBinding, restoreBinding } from "./binding.ts";
+import type { GameIdentity } from "./identity.ts";
 import { registerCommands } from "./commands.ts";
 import { withGamingSection } from "./prompt.ts";
 import { createState, resetSessionState, type SidekickState } from "./state.ts";
 import { probeCaptureSupport } from "./windowinfo.ts";
 
 /** Diagnostic entry: safe to `appendEntry`, contains no pixel data. */
-export const BINDING_ENTRY = "gamer_sidekick_binding";
-
 export default function gamerSidekick(pi: ExtensionAPI): void {
 	const state: SidekickState = createState();
 
@@ -65,11 +65,8 @@ export default function gamerSidekick(pi: ExtensionAPI): void {
 
 		// Restore an earlier binding from this session's own entries, so a
 		// resumed conversation keeps capturing without re-picking the window.
-		const restored = await restoreBinding(state, ctx.sessionManager.getEntries?.());
-		if (restored) {
-			state.binding = restored;
-			state.sessionSlug = restored.identity.slug;
-			ctx.ui.notify(`Resumed capture for ${restored.identity.exe}.`, "info");
+		if (await restoreBinding(state, ctx.sessionManager.getEntries?.())) {
+			ctx.ui.notify(`Resumed capture for ${state.binding?.identity.exe}.`, "info");
 			ctx.ui.setStatus("gamer-sidekick", statusText(state));
 		}
 	});
@@ -109,72 +106,4 @@ function includesGamingSection(prompt: string): boolean {
 	return prompt.includes("## Gaming companion");
 }
 
-interface StoredBinding {
-	slug: string;
-	exe: string;
-	title: string;
-	boundAt: string;
-}
-
-/**
- * Recover the last binding this session recorded.
- *
- * Only *identity* is restored. The HWND, bounds and display are deliberately
- * re-resolved from a live window enumeration: a handle stored in a session file
- * from three days ago may now belong to an unrelated window, and reusing it
- * would send someone else's screen to a vision model.
- */
-async function restoreBinding(
-	state: SidekickState,
-	entries: unknown,
-): Promise<SidekickState["binding"] | null> {
-	if (!Array.isArray(entries)) return null;
-
-	let stored: StoredBinding | null = null;
-	for (let i = entries.length - 1; i >= 0; i--) {
-		const entry = entries[i] as { type?: string; customType?: string; data?: StoredBinding } | undefined;
-		if (entry?.type === "custom" && entry.customType === BINDING_ENTRY && entry.data?.slug) {
-			stored = entry.data;
-			break;
-		}
-	}
-	if (!stored || !state.available) return null;
-
-	const { listWindows, isPickableWindow, resolveDisplays } = await import("./windowinfo.ts");
-	const { gameIdentity } = await import("./identity.ts");
-
-	const live = (await listWindows()).filter(isPickableWindow).find((w) => {
-		const identity = gameIdentity(w.owner?.path || w.owner?.name || w.title);
-		return identity.slug === stored?.slug;
-	});
-	if (!live) return null;
-
-	const identity = gameIdentity(live.owner?.path || live.owner?.name || live.title);
-	const resolved = await resolveDisplays();
-	const display = resolved ? pickDisplayFor(resolved.displays, live.bounds) : null;
-
-	return {
-		hwnd: live.id,
-		identity,
-		title: live.title.trim(),
-		bounds: live.bounds,
-		display: display ?? null,
-		boundAt: stored.boundAt,
-		follow: false,
-		displayOverride: null,
-	};
-}
-
-function pickDisplayFor<T extends { index: number; x: number; y: number; width: number; height: number }>(
-	displays: T[],
-	bounds: { x: number; y: number; width: number; height: number },
-): T | null {
-	const cx = bounds.x + bounds.width / 2;
-	const cy = bounds.y + bounds.height / 2;
-	for (const d of displays) {
-		if (cx >= d.x && cx < d.x + d.width && cy >= d.y && cy < d.y + d.height) return d;
-	}
-	return null;
-}
-
-export { BINDING_ENTRY as gamerSidekickBindingEntry };
+export { BINDING_ENTRY } from "./binding.ts";

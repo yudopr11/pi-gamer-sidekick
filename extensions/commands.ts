@@ -8,6 +8,7 @@
 
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { captureFrame } from "./capture.ts";
+import { appendBinding } from "./binding.ts";
 import { describeFailure } from "./attach.ts";
 import { pinFrame, unpinFrame } from "./frames.ts";
 import { gameIdentity } from "./identity.ts";
@@ -243,20 +244,36 @@ async function cmdPlay(pi: ExtensionAPI, state: SidekickState, query: string, ct
 
 	state.binding = binding;
 	state.bindingStale = false;
-	pi.appendEntry("gamer_sidekick_binding", {
+	state.sessionSlug = identity.slug;
+
+	const displayNote = display ? `display ${display.index}` : "display unknown";
+	const stored = {
 		exe: identity.exe,
 		slug: identity.slug,
 		title: binding.title,
 		boundAt: binding.boundAt,
-	});
+	};
 
-	const displayNote = display ? `display ${display.index}` : "display unknown";
 	// Everything after this runs against whichever context is current: if the
-	// game owns a session we have to replace it, and the old `pi`/`ctx` stop
-	// being valid at that instant. `finish` is therefore handed to
-	// `ensureGameSession`, which calls it on the fresh context after a switch.
-	await ensureGameSession(state, ctx, identity, (fresh: ExtensionCommandContext) => {
-		fresh.ui.notify(
+	// game owns a session we have to replace it, and the old `pi`/`ctx` — and
+	// the `state` they closed over — stop being valid at that instant.
+	// `finish` is handed to `ensureGameSession`, which calls it on the fresh
+	// context after a switch.
+	//
+	// The binding is persisted from inside `finish`, not before it. Persisting
+	// first writes the entry to the session we are about to leave, and the
+	// replacement instance — which builds its own empty state — would find
+	// nothing and report "no game bound" for a window that is very much bound.
+	await ensureGameSession(state, ctx, identity, async (fresh: ExtensionCommandContext) => {
+		if (!appendBinding(fresh, stored)) {
+			// No mutable session manager on this context. Binding works for this
+			// session only; say so rather than let it look durable.
+			fresh.ui.notify(
+				`Bound for this session only — this pi build will not persist it.`,
+				"warning",
+			);
+		}
+		await fresh.ui.notify(
 			`Capturing ${identity.exe} — "${binding.title}" ${formatSize({ width: binding.bounds.width, height: binding.bounds.height })} on ${displayNote}. Ask a question and the frame comes with it.`,
 			"info",
 		);
@@ -278,7 +295,7 @@ async function ensureGameSession(
 	state: SidekickState,
 	ctx: ExtensionCommandContext,
 	identity: ReturnType<typeof gameIdentity>,
-	finish: (ctx: ExtensionCommandContext) => void,
+	finish: (ctx: ExtensionCommandContext) => Promise<void> | void,
 ): Promise<void> {
 	// No `pi` in this signature on purpose. The read below happens before any
 	// replacement, but keeping the captured API object out of a function that
@@ -286,7 +303,7 @@ async function ensureGameSession(
 	// instance of it.
 	const current = ctx.sessionManager.getSessionName?.();
 	if (current === identity.sessionName) {
-		finish(ctx);
+		await finish(ctx);
 		return;
 	}
 
@@ -297,12 +314,12 @@ async function ensureGameSession(
 	if (existing) {
 		const { cancelled } = await ctx.switchSession(existing.path, {
 			withSession: async (fresh) => {
-				fresh.ui.notify(`Resumed ${identity.exe} session (${existing.messageCount} messages).`, "info");
-				finish(fresh);
+				await fresh.ui.notify(`Resumed ${identity.exe} session (${existing.messageCount} messages).`, "info");
+				await finish(fresh);
 			},
 		});
 		if (!cancelled) return;
-		finish(ctx);
+		await finish(ctx);
 		return;
 	}
 
@@ -310,13 +327,12 @@ async function ensureGameSession(
 		// Currently inside a *different* game's session — safe to leave it.
 		const { cancelled } = await ctx.newSession({
 			withSession: async (fresh) => {
-				state.pendingSessionName = identity.sessionName;
-				fresh.ui.notify(`Started a new ${identity.exe} session.`, "info");
-				finish(fresh);
+				await fresh.ui.notify(`Started a new ${identity.exe} session.`, "info");
+				await finish(fresh);
 			},
 		});
 		if (!cancelled) return;
-		finish(ctx);
+		await finish(ctx);
 		return;
 	}
 
@@ -331,17 +347,16 @@ async function ensureGameSession(
 	if (!start) {
 		// Keep talking here. Binding still works; only the isolation is lost, and
 		// the status line keeps saying so.
-		finish(ctx);
+		await finish(ctx);
 		return;
 	}
 	const { cancelled } = await ctx.newSession({
 		withSession: async (fresh) => {
-			state.pendingSessionName = identity.sessionName;
-			finish(fresh);
+			await finish(fresh);
 		},
 	});
 	if (!cancelled) return;
-	finish(ctx);
+	await finish(ctx);
 }
 
 // ---------------------------------------------------------------------------

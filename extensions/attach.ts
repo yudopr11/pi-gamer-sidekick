@@ -20,6 +20,7 @@
 import type { UserMessage } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { captureFrame } from "./capture.ts";
+import { nameSessionForGame, restoreBinding } from "./binding.ts";
 import { captionFor, liveFrames, pinnedFrames } from "./frames.ts";
 import { formatSize, toRecord, type Frame, type SidekickState } from "./state.ts";
 
@@ -90,21 +91,21 @@ export function registerAttachment(
 	// --- 1. capture on submit ------------------------------------------------
 	pi.on("before_agent_start", async (event, ctx) => {
 		await state.ready;
+		if (!state.available) return;
 
-		// A session created by `/gs play` still needs its name stamped. `pi` was
-		// dead inside the withSession callback, so the name was parked on state;
-		// this handler runs on a freshly bound instance where `pi` is live again.
-		if (state.pendingSessionName) {
-			const wanted = state.pendingSessionName;
-			state.pendingSessionName = null;
-			try {
-				if (pi.getSessionName() !== wanted) pi.setSessionName(wanted);
-			} catch {
-				// Naming is cosmetic. A failure here must not cost the user a turn.
+		// The binding may have been written by a `/gs play` that switched *into*
+		// this session after `session_start` had already fired — the entry lands
+		// in the new file, but the instance that read session_start has moved on
+		// and this one starts empty. Re-read before anything needs a window, or
+		// this turn answers "no game bound" for a window that is very much bound.
+		if (!state.binding) {
+			const identity = await restoreBinding(state, ctx.sessionManager?.getEntries?.());
+			if (identity) {
+				nameSessionForGame(pi, identity);
+				ctx.ui.setStatus("gamer-sidekick", statusText(state));
+				ctx.ui.notify(`Resumed capture for ${identity.exe}.`, "info");
 			}
 		}
-
-		if (!state.available) return;
 
 		if (!state.binding) {
 			if (!state.promptHintShown) {
