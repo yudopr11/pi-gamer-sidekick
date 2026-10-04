@@ -10,14 +10,12 @@
 
 import { createHash } from "node:crypto";
 
-/** A resolved game identity, used for both session naming and status display. */
+/** A resolved game identity. The display key for status output. */
 export interface GameIdentity {
 	/** Lowercased executable basename, e.g. "eldenring.exe". The display key. */
 	exe: string;
 	/** `<sanitised-exe>-<8 hex chars>`. Unique per executable path. */
 	slug: string;
-	/** `gamer-sidekick/<slug>` — the pi session name. */
-	sessionName: string;
 	/** Full path to the executable, as reported by the window owner. */
 	ownerPath: string;
 }
@@ -39,12 +37,12 @@ export function gameIdentity(ownerPath: string): GameIdentity {
 	const digest = createHash("sha256").update(normalized).digest("hex").slice(0, 8);
 
 	// Keep the extension readable (eldenring.exe, not eldenring-exe) but make
-	// every other unsafe character inert for both filenames and session names.
+	// every other unsafe character inert for both filenames and ids.
 	const sanitized = exe.replace(/[^a-z0-9._-]+/g, "-").replace(/-{2,}/g, "-").replace(/^[-.]+|[-.]+$/g, "");
 	const head = (sanitized || "game").slice(0, MAX_EXE_CHARS);
 	const slug = `${head}-${digest}`;
 
-	return { exe: exe || "unknown", slug, sessionName: `gamer-sidekick/${slug}`, ownerPath: normalized };
+	return { exe: exe || "unknown", slug, ownerPath: normalized };
 }
 
 /** Last path segment, tolerating both Windows and POSIX separators. */

@@ -22,7 +22,7 @@ import { appendBinding, restoreBinding } from "./binding.ts";
 import type { GameIdentity } from "./identity.ts";
 import { registerCommands } from "./commands.ts";
 import { withGamingSection } from "./prompt.ts";
-import { createState, resetSessionState, type SidekickState } from "./state.ts";
+import { createState, type SidekickState } from "./state.ts";
 import { probeCaptureSupport } from "./windowinfo.ts";
 
 /** Diagnostic entry: safe to `appendEntry`, contains no pixel data. */
@@ -57,10 +57,10 @@ export default function gamerSidekick(pi: ExtensionAPI): void {
 	pi.on("session_start", async (_event, ctx) => {
 		await state.ready;
 
-		// A session switch invalidates the binding: the new session has no frame
-		// ledger and the old window may not be the game the player is now in.
-		if (state.sessionSlug !== null) resetSessionState(state);
-
+		// No reset here: replacing a conversation re-runs this entry function and
+		// builds a fresh state anyway, so there is nothing carried over to clear.
+		// Whether a window is bound is decided by this conversation's own
+		// binding entry — the player's conversation, their call.
 		ctx.ui.setStatus("gamer-sidekick", statusText(state));
 
 		// Restore an earlier binding from this session's own entries, so a

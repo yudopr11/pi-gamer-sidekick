@@ -20,7 +20,7 @@
 import type { UserMessage } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { captureFrame } from "./capture.ts";
-import { nameSessionForGame, restoreBinding } from "./binding.ts";
+import { restoreBinding } from "./binding.ts";
 import { captionFor, liveFrames, pinnedFrames } from "./frames.ts";
 import { formatSize, toRecord, type Frame, type SidekickState } from "./state.ts";
 
@@ -101,7 +101,6 @@ export function registerAttachment(
 		if (!state.binding) {
 			const identity = await restoreBinding(state, ctx.sessionManager?.getEntries?.());
 			if (identity) {
-				nameSessionForGame(pi, identity);
 				ctx.ui.setStatus("gamer-sidekick", statusText(state));
 				ctx.ui.notify(`Resumed capture for ${identity.exe}.`, "info");
 			}

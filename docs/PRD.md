@@ -16,7 +16,38 @@
 | Default model | **Cheapest vision-capable model available in pi.** Recommended `gpt-6-luna` ($0.10 in / $0.50 out per 1M) |
 | Intended games | **Single-player, offline, and PvE/co-op titles. Not competitive or online multiplayer (§9).** |
 | Repository | `git`, branch `main`, root `C:/Users/yudop/Projects/sidekick` |
+| Amendment | **A1 (owner, 2026-10-04)** — per-game sessions, auto-switching and `/gs follow` are **withdrawn**. See [§0 Amendments](#0-amendments). |
 
+---
+
+## 0. Amendments
+
+### A1 — Conversations belong to the player (owner decision, 2026-10-04)
+
+**Withdrawn:** per-game sessions, auto-switching, auto session naming, `/gs game`,
+`/gs games`, `/gs use`, `/gs autoswitch`, and `/gs follow` (foreground targeting).
+
+**Why.** The player asked for the opposite of what the draft assumed. They want to
+resume whichever conversation they like with pi's own `/resume`, and they name their
+own conversations. A package that silently creates, renames and switches conversations
+competes with the thing the player is already good at, and every one of those
+behaviours has to survive the fact that replacing a conversation re-runs the
+extension and rebuilds its state from scratch — which is how the original
+`/gs play` lost its binding.
+
+**What it means now.**
+
+- `/gs play` binds a window **in the current conversation** and stops. No switch, no prompt.
+- The binding is written to that conversation's own entries, so `/resume`-ing it restores capture.
+- Starting or switching to another conversation gives you an unbound conversation. Run `/gs play` there when you want frames in it. This is a consequence of pi re-running extensions on session replacement, not a policy.
+- `/gs status` prints the exe path instead of a session name.
+- `GameIdentity` lost its `sessionName` field. The slug is still used to key frames.
+
+**Kept.** `/gs follow` went for a second, independent reason: the player alt-tabs to pi
+to type, so the foreground window *is* the terminal. Foreground targeting could only
+ever have been right under a picture-in-picture overlay this package does not have.
+The bound handle is re-validated on every capture instead, which is what §6.2.1
+already did.
 ---
 
 ## 1. What This Is — TL;DR
@@ -126,9 +157,9 @@ Explicitly **not** built. Anything here needs a new PRD.
    | -> lists open windows (exe, title, bounds)|
    | -> user picks "eldenring.exe - ELDEN     |
    |    RING"                                  |
-   | -> window bound to this session          |
-   | -> named session created:                 |
-   |      gamer-sidekick/eldenring-<hash>     |
+   | -> window bound to THIS conversation     |
+   | -> binding recorded in that conversation |
+   |    (conversations stay yours — §0 A1)    |
    +------------------------------------------+
               |
               v
@@ -199,16 +230,16 @@ Therefore: **the capture target is an explicitly bound window, identified by its
 | Identity key | Lowercased executable basename, e.g. `eldenring.exe` |
 | Collision handling | Two installs of the same exe must not share a session. Session slug = `<sanitised-exe>-<8-char hash of owner.path>` |
 | Slug sanitisation | `[a-z0-9._-]`, truncated to 40 chars |
-| Session name | `gamer-sidekick/<slug>`, applied via `pi.setSessionName()` |
-| Collision case | A window bound to a game whose slug differs from the current session's slug → §6.5 session-switch flow |
+| Conversation | **Not this package's business.** No session is created, named or switched. |
+| Collision case | Two installs of one exe in two conversations are simply two bindings. Nothing to reconcile. |
 
 #### 6.1.4 Platform guard
 
 On non-Windows, or when the native module fails to load, Gamer Sidekick **disables itself cleanly**: no commands registered that depend on capture, one `ctx.ui.notify` at load time, and a status line reading `[sidekick: unavailable on this platform]`. It must never throw during extension load.
 
-#### 6.1.5 Foreground-window escape hatch
+#### 6.1.5 Foreground-window escape hatch — **WITHDRAWN (A1)**
 
-`/gs follow` opts into foreground-target behaviour for users who bind pi *over* the game (picture-in-picture pi, or a second display where the game keeps focus). When `follow` is on, the target is re-resolved from `activeWindow()` at each capture, excluding the terminal running pi. Default **off**. Documented as experimental.
+Foreground targeting was specified here and has been removed. Re-resolving from the foreground window is wrong for this product: the player alt-tabs to pi to type, so the foreground window *is* the terminal. The mode could only ever be right under a picture-in-picture overlay this package does not have. The bound handle is now always re-validated per capture, which is the behaviour that actually holds up.
 
 ---
 
@@ -342,25 +373,17 @@ All of this is pi functionality; Gamer Sidekick only calls it.
 
 | Step | API |
 | --- | --- |
-| Name the session | `pi.setSessionName("gamer-sidekick/" + slug)` |
-| Switch to an existing game session | `ctx.switchSession(sessionPath, { withSession })` — available on `ExtensionCommandContext` |
-| Create a fresh game session | `ctx.newSession({ setup })` |
-| Persist the binding | `pi.appendEntry("gamer_sidekick_binding", {...})` inside that session |
+| Persist the binding | `pi.appendEntry("gamer_sidekick_binding", {...})` into the current conversation |
+| Restore on resume | read that entry back on `session_start` / first `before_agent_start` |
+| Anything else | **none** — conversations are the player's (§0 A1) |
 
-#### 6.5.3 Flow
+#### 6.5.3 Flow — **REPLACED BY A1**
 
-1. `/gs play <exe>` binds the window and computes the slug.
-2. If the current session is already bound to that slug → nothing to do; rename if unnamed.
-3. If a session named `gamer-sidekick/<slug>` already exists → `/gs game` offers to switch to it (carrying the full transcript and model context). Auto-switch is **off** by default (`/gs autoswitch on` to enable) because silently swapping the conversation out from under a user mid-thought is hostile.
-4. If none exists → `ctx.newSession({ setup })`, apply the name, write the binding entry, seed the system-prompt section (§6.7.2).
+`/gs play <exe>` binds the window, records the binding in the current conversation, and refreshes the status line. That is the entire flow. It never touches which conversation you are in.
 
-#### 6.5.4 Commands
+#### 6.5.4 Commands — **WITHDRAWN (A1)**
 
-| Command | Behaviour |
-| --- | --- |
-| `/gs game` | Show current game, slug, session path, message count, and whether autoswitch is on |
-| `/gs games` | List all `gamer-sidekick/*` sessions with last-used time and message count; `k` to open the picker, `d` to delete |
-| `/gs autoswitch on\|off` | Default `off` |
+`/gs game`, `/gs games` and `/gs autoswitch` are removed. The player uses pi's own `/resume`, `/rename` and `/new`.
 
 ---
 
@@ -372,12 +395,11 @@ All of this is pi functionality; Gamer Sidekick only calls it.
 | --- | --- |
 | `/gs play [exe\|n]` | Bind a game window (§6.1.2) |
 | `/gs unbind` | Stop capturing; session becomes text-only |
-| `/gs follow` | Toggle experimental foreground-target mode (§6.1.5) |
 | `/gs display <n>` | Override the display used for capture (§6.2.3) |
 | `/gs shot` | Capture a frame now, attach it, and ask the model to describe it |
 | `/gs pin [id]` / `/gs pins` / `/gs unpin [id]` | Frame pinning (§6.4) |
 | `/gs frames` | Table of captured frames this session: id, exe, size, bytes, timestamp, pinned? |
-| `/gs game` / `/gs games` / `/gs autoswitch` | Session management (§6.5.4) |
+| *(none)* | Session management is the player's, via pi's own `/resume` (§0 A1) |
 | `/gs models` | List pi's models, marking which accept image input, cheapest first |
 | `/gs status` | Bound window, display, model, thinking level, context usage, frames this session, estimated image tokens |
 | `/gs setup` | Guided check: native module loads, window list readable, capture produces a non-black frame, selected model accepts images (§6.7.1) |
@@ -484,7 +506,6 @@ pi-gamer-sidekick/
 │   ├── capture.ts            # pipeline + failure handling (§6.2)
 │   ├── attach.ts             # before_agent_start + context injection (§6.3)
 │   ├── frames.ts             # pinning, budgets, accounting (§6.4, §6.8)
-│   ├── sessions.ts           # per-game sessions (§6.5)
 │   ├── commands.ts           # /gs command surface (§6.6.1)
 │   ├── tools.ts              # game_frame, game_window (§6.6.2)
 │   └── prompt.ts             # system-prompt section (§6.7.2)
@@ -549,7 +570,7 @@ Every API this package touches, with its verified signature. Nothing outside thi
 | `pi.getSettings()` | `() => Settings` | reading user preferences |
 | `ctx.switchSession(path, { withSession })` | `ExtensionCommandContext` | §6.5.2 |
 | `ctx.newSession({ setup })` | `ExtensionCommandContext` | §6.5.2 |
-| `ctx.ui.select(options)` | dialog; works in TUI **and** RPC mode | §6.1.2 picker, `/gs games` |
+| `ctx.ui.select(options)` | dialog; works in TUI **and** RPC mode | §6.1.2 picker |
 | `ctx.ui.notify(msg)` | fire-and-forget | failure notices |
 | `ctx.ui.setStatus(key, text)` | fire-and-forget; **no-op in RPC mode** | §6.6.3 |
 | `ctx.mode`, `ctx.hasUI` | `"tui" \| "rpc" \| …`, boolean | mode guards |
@@ -631,10 +652,10 @@ Option B from the original discussion: keep this package as the entire brain, an
 
 | ID | Scenario | Expected outcome |
 | --- | --- | --- |
-| **AC-GS-05** | Bind game A, ask three questions; bind game B, ask one | Game B's session contains none of game A's turns |
-| **AC-GS-06** | Rebind game A after restarting pi | `/gs play` offers the existing `gamer-sidekick/<slug>` session; switching restores the full transcript |
+| **AC-GS-05** | Bind game A, ask three questions; switch to another conversation | The other conversation is unbound; nothing from game A leaks into it |
+| **AC-GS-06** | Rebind game A after restarting pi | `/gs play` re-binds the window in the current conversation; no session is offered, named or switched |
 | **AC-GS-07** | Drive one game session past the compaction threshold | Compaction runs, the transcript is unchanged, and the model still remembers earlier facts |
-| **AC-GS-08** | `/gs games` with two sessions | Lists both with message counts; selecting one switches to it |
+| **AC-GS-08** | ~~`/gs games` lists sessions~~ | **Withdrawn (A1)** — superseded by AC-GS-21 |
 
 ### 12.3 Privacy
 
@@ -662,6 +683,7 @@ Option B from the original discussion: keep this package as the entire brain, an
 | **AC-GS-18** | Two pi sessions running simultaneously, bound to different games | Each captures its own window; no cross-talk |
 | **AC-GS-19** | Select a text-only model via `/model` | Capture is skipped (E7); the package does not waste a capture |
 | **AC-GS-20** | `npm pack` the package and inspect the tarball | No `node_modules`, no bundled copy of a host-provided package, `pi-package` keyword present |
+| **AC-GS-21** | `/gs play` in a conversation, then `/resume` a different one and ask a question | The resumed conversation captures only if it has its own binding entry; `/resume` back and capture resumes. `/gs` never creates, renames or switches a conversation. |
 
 ---
 
@@ -673,7 +695,7 @@ Option B from the original discussion: keep this package as the entire brain, an
 | **M1** | Binding: `/gs play` picker, identity/slug, stale-handle validation, display resolution | AC-GS-03, AC-GS-05 |
 | **M2** | Capture pipeline + `before_agent_start` + `context` injection | AC-GS-01, AC-GS-02, **AC-GS-09**, AC-GS-10 |
 | **M3** | Failure handling: closed, minimized, black, slow, crop-clamp | AC-GS-12, AC-GS-13 |
-| **M4** | Sessions: naming, switch, `/gs games`, autoswitch, compaction transparency | AC-GS-05, AC-GS-06, AC-GS-07, AC-GS-08 |
+| **M4** | ~~Sessions: naming, switch, `/gs games`, autoswitch~~ → compaction transparency only | AC-GS-07, AC-GS-08, AC-GS-21 |
 | **M5** | Polish: tools, pinning, status line, accounting, prompt section, README, `/gs setup` | AC-GS-04, AC-GS-11, AC-GS-14, AC-GS-18, AC-GS-19, AC-GS-20 |
 
 M2 is the milestone that matters. **If frames cannot be attached without hitting disk, stop and re-scope** (see §6.3.2 — the `context` hook is the mechanism, and it is the design's load-bearing assumption).
@@ -704,7 +726,7 @@ M2 is the milestone that matters. **If frames cannot be attached without hitting
 | **G-O1** | Package name: `pi-gamer-sidekick` vs `@<owner>/pi-gamer-sidekick`? | Scoped name if publishing publicly; unscoped is fine for a private install |
 | **G-O2** | Should `/gs play` be required, or should the first `/gs` invocation in a session prompt to bind? | Prompt once per session on the first captured turn, then stay silent |
 | **G-O3** | Pin limit 3 vs 5? | 3 — pinned frames are re-injected every turn, and each costs ~1,100 tokens of permanent context |
-| **G-O4** | Auto-switch to another game's session when the bound game changes, or warn? | Warn (autoswitch off by default) — silent conversation swapping loses context the user cannot see |
+| **G-O4** | ~~Auto-switch to another game's session when the bound game changes~~ | **Closed by A1** — no session switching at all |
 | **G-O5** | Competitive-title list: ship one, or leave the hook empty? | Ship a short starter list; users can edit it without a code change |
 | **G-O6** | Should `skills/gaming-companion` be included in v0.1.0, or deferred? | Defer to a post-v0 release — it is a content asset, not a mechanism, and it widens review surface |
 | **G-O7** | License | MIT, if published |

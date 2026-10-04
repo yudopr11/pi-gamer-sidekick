@@ -36,6 +36,7 @@ const result = {
 	frame: undefined as Entry | undefined,
 	sessionName: "(unnamed)",
 	statuses: [] as string[],
+	statusAfterBind: "(none)",
 	notices: [] as string[],
 	sawAsk: false,
 };
@@ -97,8 +98,14 @@ createInterface({ input: child.stdout }).on("line", (line) => {
 	if (id === "play") {
 		console.log(`  /gs play ${GAME}  ->  success=${msg.success}`);
 		inspect("post-bind");
+	} else if (id === "cold") {
+		console.log("  started a fresh session (cold path)");
+		send({ id: "play", type: "prompt", message: `/gs play ${GAME}` });
 	} else if (id === "post-bind-state") {
 		result.sessionName = (data?.sessionName as string) ?? "(unnamed)";
+		// The regression this was rewritten for: a bind that succeeds while the
+		// status line keeps saying "no game bound".
+		result.statusAfterBind = result.statuses.at(-1) ?? "(none)";
 	} else if (id === "post-bind-entries") {
 		result.binding = entriesOf(data).find((e) => e.customType === "gamer_sidekick_binding");
 		afterBind();
@@ -113,17 +120,23 @@ createInterface({ input: child.stdout }).on("line", (line) => {
 function report(): void {
 	const bound = Boolean(result.binding);
 	const shot = Boolean(result.frame);
-	const ok = bound && shot;
+	const toldTruth = !/no game bound/.test(result.statusAfterBind);
+	// A1: the package does not own conversation titles. Anything starting with
+	// "gamer-sidekick/" means we renamed the player's conversation.
+	const namedByUs = /^gamer-sidekick\//.test(result.sessionName);
+	const ok = bound && shot && toldTruth && !namedByUs;
 
 	console.log("");
 	console.log(`  binding entry  : ${bound ? "present in the current session" : "MISSING"}`);
 	console.log(`  session name   : ${result.sessionName}`);
+	console.log(`  status after /gs play : ${result.statusAfterBind}${toldTruth ? "" : "   <-- STALE"}`);
 	console.log(`  frame captured : ${shot ? "yes — the next turn used the binding" : "NO — nothing was captured"}`);
+	console.log(`  renamed your conversation? ${namedByUs ? "YES — that is a bug (A1)" : "no"}`);
 	console.log(`  last status    : ${result.statuses.at(-1) ?? "(none)"}`);
 	console.log(`  notices        : ${JSON.stringify(result.notices.slice(0, 3))}`);
 	if (result.frame) console.log(`  frame record   : ${JSON.stringify(result.frame.data)}`);
 	console.log("");
-	console.log(ok ? "PASS — bound, survived the switch, and captured on the next turn." : "FAIL");
+	console.log(ok ? "PASS — bound in place, conversation untouched, captured on the next turn." : "FAIL");
 	child.kill();
 	process.exit(ok ? 0 : 1);
 }

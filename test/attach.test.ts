@@ -80,12 +80,11 @@ function boundState(): SidekickState {
 	s.ready = Promise.resolve();
 	s.binding = {
 		hwnd: 1,
-		identity: { exe: "sora_2nd.exe", slug: "sora-1", sessionName: "gamer-sidekick/sora-1", ownerPath: "C:/sora_2nd.exe" },
+		identity: { exe: "sora_2nd.exe", slug: "sora-1", ownerPath: "C:/sora_2nd.exe" },
 		title: "Trails in the Sky 2nd Chapter",
 		bounds: { x: 0, y: 0, width: 2560, height: 1440 },
 		display: { index: 0, x: 0, y: 0, width: 2560, height: 1440 },
 		boundAt: new Date().toISOString(),
-		follow: false,
 		displayOverride: null,
 	};
 	return s;

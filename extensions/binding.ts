@@ -105,27 +105,8 @@ export async function restoreBinding(state: SidekickState, entries: unknown): Pr
 		bounds: live.bounds,
 		display,
 		boundAt: stored.boundAt,
-		follow: false,
 		displayOverride: null,
 	};
 	state.bindingStale = false;
-	state.sessionSlug = identity.slug;
 	return identity;
-}
-
-/**
- * Name the session after the game it is bound to.
- *
- * Reachable only through `pi` — `ReadonlySessionManager` has no setter, and
- * the context handed to `withSession` after a switch has no `pi` at all. Doing
- * it where the binding is restored means it lands on whichever instance is
- * live, including the one that replaced the one that started the session.
- */
-export function nameSessionForGame(pi: ExtensionAPI, identity: GameIdentity | undefined): void {
-	if (!identity) return;
-	try {
-		if (pi.getSessionName() !== identity.sessionName) pi.setSessionName(identity.sessionName);
-	} catch {
-		// Cosmetic. Never worth failing a turn over.
-	}
 }

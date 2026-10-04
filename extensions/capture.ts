@@ -20,7 +20,7 @@ import {
 	fitLongEdge,
 	type CropRect,
 } from "./geometry.ts";
-import { captureWindow, listWindows, probeOccluders, queryWindow, resolveDisplays } from "./windowinfo.ts";
+import { captureWindow, probeOccluders, queryWindow, resolveDisplays } from "./windowinfo.ts";
 import type { CaptureFailure, Frame, FrameRecord, SidekickState } from "./state.ts";
 import { formatSize } from "./state.ts";
 
@@ -69,32 +69,16 @@ export async function captureFrame(state: SidekickState, reason: string): Promis
 	// The HWND is never trusted. Windows recycles handles, so a binding written
 	// last week can point at an unrelated window today. One targeted query, not
 	// a full enumeration — this runs on the capture path. (PRD §11 R-5)
-	let bounds = binding.bounds;
-	let title = binding.title;
-	if (!binding.follow) {
-		const live = await queryWindow(binding.hwnd);
-		if (!live) {
-			state.bindingStale = true;
-			return { ok: false, failure: { kind: "stale-binding" }, elapsedMs: Date.now() - started };
-		}
-		if (live.minimized || live.bounds.width === 0 || live.bounds.height === 0) {
-			return { ok: false, failure: { kind: "minimized" }, elapsedMs: Date.now() - started };
-		}
-		bounds = live.bounds;
-		title = live.title;
-	} else {
-		// Experimental: re-resolve the target by exe path. The user alt-tabs to
-		// the terminal to type, so "whatever is in front" is only ever right
-		// while a real overlay holds focus — which is why it is off by default.
-		const fg = (await listWindows()).find((w) => w.owner.path === binding.identity.ownerPath);
-		if (fg) {
-			bounds = fg.bounds;
-			title = fg.title;
-		}
-		if (bounds.width === 0 || bounds.height === 0) {
-			return { ok: false, failure: { kind: "minimized" }, elapsedMs: Date.now() - started };
-		}
+	const live = await queryWindow(binding.hwnd);
+	if (!live) {
+		state.bindingStale = true;
+		return { ok: false, failure: { kind: "stale-binding" }, elapsedMs: Date.now() - started };
 	}
+	if (live.minimized || live.bounds.width === 0 || live.bounds.height === 0) {
+		return { ok: false, failure: { kind: "minimized" }, elapsedMs: Date.now() - started };
+	}
+	const bounds = live.bounds;
+	const title = live.title;
 
 	// --- DISPLAY -------------------------------------------------------------
 	const displayIndex = binding.displayOverride ?? binding.display?.index ?? 0;

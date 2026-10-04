@@ -9,12 +9,12 @@
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { captureFrame } from "./capture.ts";
 import { appendBinding } from "./binding.ts";
-import { describeFailure } from "./attach.ts";
+import { describeFailure, statusText } from "./attach.ts";
 import { pinFrame, unpinFrame } from "./frames.ts";
 import { gameIdentity } from "./identity.ts";
-import { findSessionFor, isGameSession, listGameSessions, SESSION_PREFIX } from "./sessions.ts";
 import { formatSize, type Binding, type SidekickState } from "./state.ts";
 import {
+	displayFor,
 	filterWindows,
 	formatWindowChoice,
 	isPickableWindow,
@@ -34,12 +34,12 @@ const HELP = [
 	"  /gs shot          grab a frame now and report it",
 	"  /gs pin [id]      keep a frame in context for every later turn",
 	"  /gs unpin [id|all]",
-	"  /gs sessions      list saved per-game sessions",
-	"  /gs use <slug>    switch to another game's session",
-	"  /gs follow <on|off>   track the foreground window instead of a fixed one",
 	"  /gs display <n>   force which display to capture from",
 	"  /gs setup         check that screen capture works here",
 	"  /gs unbind        stop capturing",
+	"",
+	"Conversations are yours: /resume, /rename and /new all work normally.",
+	"A window stays bound to the conversation you bound it in.",
 	"",
 	"Frames are never written to disk. They exist in memory for the turn.",
 ].join("\n");
@@ -49,8 +49,8 @@ export function registerCommands(pi: ExtensionAPI, state: SidekickState): void {
 		description: "Gamer Sidekick — capture your game window into the conversation",
 		getArgumentCompletions(prefix) {
 			const subs = [
-				"play", "status", "frames", "shot", "pin", "unpin", "sessions", "use",
-				"follow", "display", "setup", "unbind", "help",
+				"play", "status", "frames", "shot", "pin", "unpin",
+				"display", "setup", "unbind", "help",
 			];
 			const hits = subs.filter((s) => s.startsWith(prefix));
 			return hits.length > 0 ? hits.map((value) => ({ value, label: value })) : null;
@@ -65,40 +65,54 @@ export function registerCommands(pi: ExtensionAPI, state: SidekickState): void {
 			const [sub = "help", ...rest] = args.trim().split(/\s+/);
 			const arg = rest.join(" ");
 
-			switch (sub) {
-				case "help":
-				case "":
-					ctx.ui.notify(HELP, "info");
-					return;
-				case "status":
-					return cmdStatus(state, ctx);
-				case "setup":
-					return cmdSetup(state, ctx);
-				case "play":
-					return cmdPlay(pi, state, arg, ctx);
-				case "unbind":
-					return cmdUnbind(state, ctx);
-				case "frames":
-					return cmdFrames(state, ctx);
-				case "shot":
-					return cmdShot(state, ctx);
-				case "pin":
-					return cmdPin(state, arg, ctx);
-				case "unpin":
-					return cmdUnpin(state, arg, ctx);
-				case "sessions":
-					return cmdSessions(pi, state, ctx);
-				case "use":
-					return cmdUse(pi, state, arg, ctx);
-				case "follow":
-					return cmdFollow(state, arg, ctx);
-				case "display":
-					return cmdDisplay(state, arg, ctx);
-				default:
-					ctx.ui.notify(`Unknown subcommand "${sub}". Try /gs help`, "warning");
+			// Whatever the subcommand did, the status line has to end up telling
+			// the truth. It is the only persistent indicator this package has, and
+			// nothing refreshes it between commands — so a `/gs play` that
+			// succeeded would otherwise keep rendering "no game bound" until the
+			// next turn ended, which reads as a failure.
+			// `/gs play` sets it on the post-switch context itself; this covers
+			// every other subcommand.
+			try {
+				await runSubcommand(state, sub, arg, ctx);
+			} finally {
+				ctx.ui.setStatus("gamer-sidekick", statusText(state));
 			}
 		},
 	});
+}
+
+async function runSubcommand(
+	state: SidekickState,
+	sub: string,
+	arg: string,
+	ctx: ExtensionCommandContext,
+): Promise<void> {
+	switch (sub) {
+		case "help":
+		case "":
+			ctx.ui.notify(HELP, "info");
+			return;
+		case "status":
+			return cmdStatus(state, ctx);
+		case "setup":
+			return cmdSetup(state, ctx);
+		case "play":
+			return cmdPlay(state, arg, ctx);
+		case "unbind":
+			return cmdUnbind(state, ctx);
+		case "frames":
+			return cmdFrames(state, ctx);
+		case "shot":
+			return cmdShot(state, ctx);
+		case "pin":
+			return cmdPin(state, arg, ctx);
+		case "unpin":
+			return cmdUnpin(state, arg, ctx);
+		case "display":
+			return cmdDisplay(state, arg, ctx);
+		default:
+			ctx.ui.notify(`Unknown subcommand "${sub}". Try /gs help`, "warning");
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -118,10 +132,10 @@ function cmdStatus(state: SidekickState, ctx: ExtensionCommandContext): void {
 	const b = state.binding;
 	const lines = [
 		`game      ${b.identity.exe}  (${b.title})`,
+		`exe       ${b.identity.ownerPath}`,
 		`window    ${formatSize({ width: b.bounds.width, height: b.bounds.height })} at (${b.bounds.x}, ${b.bounds.y})  hwnd ${b.hwnd}`,
 		`display   ${b.displayOverride ?? b.display?.index ?? "?"}${b.display ? `  ${b.display.width}x${b.display.height} at (${b.display.x},${b.display.y})` : ""}`,
-		`session   ${b.identity.sessionName}`,
-		`bound     ${new Date(b.boundAt).toLocaleString()}${b.follow ? "  (following foreground)" : ""}`,
+		`bound     ${new Date(b.boundAt).toLocaleString()}`,
 		`frames    ${state.framesCaptured} captured · ${state.framesAttached} attached · ${state.framesDropped} dropped`,
 		`pins      ${state.pinned.length > 0 ? state.pinned.join(", ") : "none"}`,
 	];
@@ -191,7 +205,7 @@ async function cmdShot(state: SidekickState, ctx: ExtensionCommandContext): Prom
 // /gs play — the binding flow (PRD §6.1)
 // ---------------------------------------------------------------------------
 
-async function cmdPlay(pi: ExtensionAPI, state: SidekickState, query: string, ctx: ExtensionCommandContext): Promise<void> {
+async function cmdPlay(state: SidekickState, query: string, ctx: ExtensionCommandContext): Promise<void> {
 	if (!state.available) {
 		ctx.ui.notify(`Gamer Sidekick is off: ${state.disabledReason ?? "still starting up"}`, "error");
 		return;
@@ -229,7 +243,7 @@ async function cmdPlay(pi: ExtensionAPI, state: SidekickState, query: string, ct
 
 	const identity = gameIdentity(chosen.owner?.path || chosen.owner?.name || chosen.title);
 	const displays = resolved?.displays ?? [];
-	const display = pickDisplayFor(displays, chosen.bounds);
+	const display = displayFor(displays, chosen.bounds);
 
 	const binding: Binding = {
 		hwnd: chosen.id,
@@ -238,13 +252,11 @@ async function cmdPlay(pi: ExtensionAPI, state: SidekickState, query: string, ct
 		bounds: chosen.bounds,
 		display: display ?? null,
 		boundAt: new Date().toISOString(),
-		follow: state.binding?.follow ?? false,
 		displayOverride: state.binding?.displayOverride ?? null,
 	};
 
 	state.binding = binding;
 	state.bindingStale = false;
-	state.sessionSlug = identity.slug;
 
 	const displayNote = display ? `display ${display.index}` : "display unknown";
 	const stored = {
@@ -254,113 +266,24 @@ async function cmdPlay(pi: ExtensionAPI, state: SidekickState, query: string, ct
 		boundAt: binding.boundAt,
 	};
 
-	// Everything after this runs against whichever context is current: if the
-	// game owns a session we have to replace it, and the old `pi`/`ctx` — and
-	// the `state` they closed over — stop being valid at that instant.
-	// `finish` is handed to `ensureGameSession`, which calls it on the fresh
-	// context after a switch.
-	//
-	// The binding is persisted from inside `finish`, not before it. Persisting
-	// first writes the entry to the session we are about to leave, and the
-	// replacement instance — which builds its own empty state — would find
-	// nothing and report "no game bound" for a window that is very much bound.
-	await ensureGameSession(state, ctx, identity, async (fresh: ExtensionCommandContext) => {
-		if (!appendBinding(fresh, stored)) {
-			// No mutable session manager on this context. Binding works for this
-			// session only; say so rather than let it look durable.
-			fresh.ui.notify(
-				`Bound for this session only — this pi build will not persist it.`,
-				"warning",
-			);
-		}
-		await fresh.ui.notify(
-			`Capturing ${identity.exe} — "${binding.title}" ${formatSize({ width: binding.bounds.width, height: binding.bounds.height })} on ${displayNote}. Ask a question and the frame comes with it.`,
-			"info",
-		);
-	});
-}
-
-/**
- * Ensure this conversation is the game's own session.
- *
- * Deliberately not automatic on first bind if the player is mid-conversation:
- * starting a new session throws away context they may want. They are asked.
- *
- * `finish` receives a *valid* context for the session that ends up current. The
- * captured `pi` and `ctx` are dead the moment newSession/switchSession
- * resolves, so every post-replacement side effect has to be re-homed onto the
- * replacement context that pi hands to `withSession`.
- */
-async function ensureGameSession(
-	state: SidekickState,
-	ctx: ExtensionCommandContext,
-	identity: ReturnType<typeof gameIdentity>,
-	finish: (ctx: ExtensionCommandContext) => Promise<void> | void,
-): Promise<void> {
-	// No `pi` in this signature on purpose. The read below happens before any
-	// replacement, but keeping the captured API object out of a function that
-	// outlives it removes the whole class of stale-ctx bug rather than one
-	// instance of it.
-	const current = ctx.sessionManager.getSessionName?.();
-	if (current === identity.sessionName) {
-		await finish(ctx);
-		return;
+	if (!appendBinding(ctx, stored)) {
+		// No mutable session manager on this context. Binding works for this
+		// session only; say so rather than let it look durable.
+		ctx.ui.notify(`Bound for this session only — this pi build will not persist it.`, "warning");
 	}
-
-	const sessionDir = ctx.sessionManager.getSessionDir();
-	const existing = await findSessionFor(sessionDir, identity);
-	state.sessionSlug = identity.slug;
-
-	if (existing) {
-		const { cancelled } = await ctx.switchSession(existing.path, {
-			withSession: async (fresh) => {
-				await fresh.ui.notify(`Resumed ${identity.exe} session (${existing.messageCount} messages).`, "info");
-				await finish(fresh);
-			},
-		});
-		if (!cancelled) return;
-		await finish(ctx);
-		return;
-	}
-
-	if (isGameSession(current)) {
-		// Currently inside a *different* game's session — safe to leave it.
-		const { cancelled } = await ctx.newSession({
-			withSession: async (fresh) => {
-				await fresh.ui.notify(`Started a new ${identity.exe} session.`, "info");
-				await finish(fresh);
-			},
-		});
-		if (!cancelled) return;
-		await finish(ctx);
-		return;
-	}
-
-	const start = await ctx.ui.confirm(
-		`Start a ${identity.exe} session?`,
-		`This conversation is not a game session. Each game gets its own conversation so the model does not mix up ` +
-			`games. Starting one leaves this conversation behind.`,
-		// Unanswered means no: leaving the conversation in place is recoverable,
-		// silently abandoning it is not.
-		{ timeout: 180_000 },
+	// The status line is the only persistent indicator this package has, and
+	// nothing else refreshes it until a turn ends. Without this it keeps
+	// saying "no game bound" right through a bind that succeeded — which reads
+	// as a failure and sends the player looking for a second one.
+	ctx.ui.setStatus("gamer-sidekick", statusText(state));
+	await ctx.ui.notify(
+		`Capturing ${identity.exe} — "${binding.title}" ${formatSize({ width: binding.bounds.width, height: binding.bounds.height })} on ${displayNote}. Ask a question and the frame comes with it.`,
+		"info",
 	);
-	if (!start) {
-		// Keep talking here. Binding still works; only the isolation is lost, and
-		// the status line keeps saying so.
-		await finish(ctx);
-		return;
-	}
-	const { cancelled } = await ctx.newSession({
-		withSession: async (fresh) => {
-			await finish(fresh);
-		},
-	});
-	if (!cancelled) return;
-	await finish(ctx);
 }
 
 // ---------------------------------------------------------------------------
-// /gs unbind, pin, unpin, follow, display
+// /gs unbind, pin, unpin, display
 // ---------------------------------------------------------------------------
 
 function cmdUnbind(state: SidekickState, ctx: ExtensionCommandContext): void {
@@ -388,25 +311,6 @@ function cmdUnpin(state: SidekickState, arg: string, ctx: ExtensionCommandContex
 	ctx.ui.notify(unpinFrame(state, id).message, "info");
 }
 
-function cmdFollow(state: SidekickState, arg: string, ctx: ExtensionCommandContext): void {
-	if (!state.binding) {
-		ctx.ui.notify("Bind a window first with /gs play.", "warning");
-		return;
-	}
-	const value = arg.trim().toLowerCase();
-	if (value !== "on" && value !== "off") {
-		ctx.ui.notify(`Follow is ${state.binding.follow ? "on" : "off"}. Usage: /gs follow <on|off>`, "info");
-		return;
-	}
-	state.binding.follow = value === "on";
-	ctx.ui.notify(
-		state.binding.follow
-			? "Follow mode ON — every capture re-resolves the target window. Experimental."
-			: "Follow mode OFF — capturing the bound window.",
-		"info",
-	);
-}
-
 function cmdDisplay(state: SidekickState, arg: string, ctx: ExtensionCommandContext): void {
 	if (!state.binding) {
 		ctx.ui.notify("Bind a window first with /gs play.", "warning");
@@ -423,71 +327,3 @@ function cmdDisplay(state: SidekickState, arg: string, ctx: ExtensionCommandCont
 }
 
 // ---------------------------------------------------------------------------
-// /gs sessions, /gs use
-// ---------------------------------------------------------------------------
-
-async function cmdSessions(pi: ExtensionAPI, state: SidekickState, ctx: ExtensionCommandContext): Promise<void> {
-	const dir = ctx.sessionManager.getSessionDir();
-	const sessions = await listGameSessions(dir, ctx.sessionManager.getSessionId());
-
-	if (sessions.length === 0) {
-		ctx.ui.notify(`No game sessions saved in ${dir}. Run /gs play to create one.`, "info");
-		return;
-	}
-
-	const labels = sessions.map((s) => {
-		const mark = s.active ? "● " : "  ";
-		return `${mark}${s.exe}  ${s.messageCount} msg  ${s.modified.toLocaleString()}  (${s.slug})`;
-	});
-	const picked = await ctx.ui.select("Game sessions — pick one to switch", labels);
-	if (!picked) return;
-
-	const index = labels.indexOf(picked);
-	const target = sessions[index];
-	if (!target) return;
-	if (target.active) {
-		ctx.ui.notify("Already in that session.", "info");
-		return;
-	}
-	await ctx.switchSession(target.path);
-	state.sessionSlug = target.slug;
-	pi.setSessionName(target.name ?? `${SESSION_PREFIX}${target.slug}`);
-	ctx.ui.notify(`Switched to ${target.exe}. Rebind its window with /gs play.`, "info");
-}
-
-async function cmdUse(pi: ExtensionAPI, state: SidekickState, slug: string, ctx: ExtensionCommandContext): Promise<void> {
-	if (!slug.trim()) {
-		ctx.ui.notify("Usage: /gs use <slug>  — run /gs sessions to list them", "warning");
-		return;
-	}
-	const dir = ctx.sessionManager.getSessionDir();
-	const sessions = await listGameSessions(dir, ctx.sessionManager.getSessionId());
-	const needle = slug.trim().toLowerCase();
-	const target = sessions.find((s) => s.slug.toLowerCase() === needle || s.slug.toLowerCase().startsWith(needle));
-
-	if (!target) {
-		ctx.ui.notify(
-			sessions.length > 0 ? `No session matching "${slug}". Known: ${sessions.map((s) => s.slug).join(", ")}` : "No game sessions saved yet.",
-			"warning",
-		);
-		return;
-	}
-	await ctx.switchSession(target.path);
-	state.sessionSlug = target.slug;
-	pi.setSessionName(target.name ?? `${SESSION_PREFIX}${target.slug}`);
-	ctx.ui.notify(`Switched to ${target.exe}. Rebind its window with /gs play.`, "info");
-}
-
-// ---------------------------------------------------------------------------
-
-function pickDisplayFor<T extends { index: number; x: number; y: number; width: number; height: number }>(
-	displays: T[],
-	bounds: { x: number; y: number; width: number; height: number },
-): T | null {
-	const cx = bounds.x + bounds.width / 2;
-	const cy = bounds.y + bounds.height / 2;
-	for (const d of displays) {
-		if (cx >= d.x && cx < d.x + d.width && cy >= d.y && cy < d.y + d.height) return d;
-	}
-	return null;
-}

@@ -31,4 +31,5 @@ A frame of the player's game window is attached to the turn. Read it before answ
 - No game bound — `/gs play` picks one. `/gs unbind` clears it. A handle going stale (game closed, window recreated) is reported by `/gs status`; re-run `/gs play`.
 - Black frame — exclusive fullscreen is not capturable through the desktop-grab path. Switch to borderless or windowed, then re-ask. Nothing is lost; the question still gets answered without the frame.
 - Frames cost tokens. Each one lands in the context for the turns that reference it. Prefer pinning one good frame over capturing repeatedly.
-- `/gs sessions` lists per-game conversations; `/gs use <n>` switches. Switching mid-question loses the current context, so finish the thought first.
+- `/gs status` reports what is bound; re-run `/gs play` if the handle went stale (game restarted, window recreated).
+- Conversations belong to the player. `/gs` never creates, renames or switches one — if capture seems missing in a different conversation, that conversation simply has no binding yet and `/gs play` there fixes it.

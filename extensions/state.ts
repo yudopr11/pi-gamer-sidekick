@@ -27,8 +27,6 @@ export interface Binding {
 	bounds: { x: number; y: number; width: number; height: number };
 	display: DisplayInfo | null;
 	boundAt: string;
-	/** Experimental: re-resolve the target from the foreground window each capture. */
-	follow: boolean;
 	/** Manual display override from `/gs display <n>`. */
 	displayOverride: number | null;
 }
@@ -104,12 +102,9 @@ export interface SidekickState {
 	framesAttached: number;
 	framesDropped: number;
 
-	autoswitch: boolean;
 	promptHintShown: boolean;
 
 	lastError: string | null;
-	/** Slug of the game this session is bound to, for session-switch detection. */
-	sessionSlug: string | null;
 }
 
 export function createState(): SidekickState {
@@ -126,25 +121,9 @@ export function createState(): SidekickState {
 		framesCaptured: 0,
 		framesAttached: 0,
 		framesDropped: 0,
-		autoswitch: false,
 		promptHintShown: false,
 		lastError: null,
-		sessionSlug: null,
 	};
-}
-
-/** Reset per-session state. Keeps user preferences (autoswitch) across sessions. */
-export function resetSessionState(state: SidekickState): void {
-	state.binding = null;
-	state.bindingStale = false;
-	state.frames = [];
-	state.pinned = [];
-	state.nextFrameId = 1;
-	state.pendingFrame = null;
-	state.framesCaptured = 0;
-	state.framesAttached = 0;
-	state.framesDropped = 0;
-	state.lastError = null;
 }
 
 /** Find a captured frame by id. */
