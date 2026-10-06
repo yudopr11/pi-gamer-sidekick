@@ -11,8 +11,8 @@
  *   1. Never crash pi. Every optional native dependency is lazy-loaded and
  *      fails soft, so a machine without a working screen-capture module still
  *      loads the package and can run `/gs setup` to find out why.
- *   2. Never block the game. Capture happens after the user pressed Enter,
- *      never on a timer, never in the foreground process's hot path.
+ *   2. Never block the game. On-demand capture happens after the user pressed
+ *      Enter. Opt-in history samples at 1 fps on a background timer.
  *   3. Never write pixels anywhere the player did not ask for. A frame ends up
  *      in the conversation — which means in the session file — because that is
  *      what makes it survive a `/resume`. See extensions/attach.ts.
@@ -22,6 +22,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerAttachment, statusText } from "./attach.ts";
 import { appendBinding, restoreBinding } from "./binding.ts";
 import { rehydrateLedger } from "./ledger.ts";
+import { stopHistory } from "./history.ts";
 import { registerCommands } from "./commands.ts";
 import { withGamingSection } from "./prompt.ts";
 import { createState, type SidekickState } from "./state.ts";
@@ -57,6 +58,8 @@ export default function gamerSidekick(pi: ExtensionAPI): void {
 
 	// --- session lifecycle ---------------------------------------------------
 	pi.on("session_start", async (_event, ctx) => {
+		// Rolling pixels are process/session-local and must not cross conversations.
+		stopHistory(state);
 		await state.ready;
 
 		// Colour the status line only where a terminal will draw it. `ctx.mode`

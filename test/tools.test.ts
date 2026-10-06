@@ -169,6 +169,49 @@ describe("game_frame", () => {
 		assert.match(JSON.stringify(appended[0]?.data), /"tool"/, "provenance says where it came from");
 	});
 
+	it("uses only history available when game_frame starts", async () => {
+		const state = boundState();
+		state.historyEnabled = true;
+		state.historyFrames = [makeFrame(1)];
+		let finishCapture!: (result: { ok: true; frame: Frame; elapsedMs: number }) => void;
+		const delayedCapture = () => new Promise<{ ok: true; frame: Frame; elapsedMs: number }>((resolve) => { finishCapture = resolve; });
+		const { tool } = setup(state, delayedCapture);
+		const resultPromise = tool.execute("call-history-snapshot", {});
+		await new Promise((resolve) => setImmediate(resolve));
+		state.historyFrames.push(makeFrame(2));
+		finishCapture({ ok: true, frame: makeFrame(3), elapsedMs: 1 });
+
+		const result = await resultPromise;
+		assert.deepEqual(result.content.filter((c) => c.type === "text").map((c) => c.text?.match(/(?:FRAME|HISTORY) #(\d+)/)?.[1]), ["001", "003"]);
+	});
+
+	it("adds a small temporally spaced selection of rolling history only when enabled", async () => {
+		const state = boundState();
+		state.historyEnabled = true;
+		state.historyFrames = [1, 2, 3, 4, 5, 6].map((id) => makeFrame(id));
+		const { tool } = setup(state, capturesFrame(7));
+
+		const result = await tool.execute("call-history", {});
+
+		assert.deepEqual(result.content.filter((c) => c.type === "image").map((c) => c.data), [
+			JPEG_B64, JPEG_B64, JPEG_B64, JPEG_B64,
+		]);
+		const captions = result.content.filter((c) => c.type === "text").map((c) => c.text ?? "");
+		assert.equal(captions.length, 4, "three spaced history frames plus current frame");
+		assert.deepEqual(captions.map((caption) => Number(caption.match(/(?:FRAME|HISTORY) #(\d+)/)?.[1])), [1, 3, 6, 7]);
+	});
+
+	it("does not return history while the opt-in mode is disabled", async () => {
+		const state = boundState();
+		state.historyFrames = [makeFrame(1), makeFrame(2)];
+		const { tool } = setup(state, capturesFrame(3));
+
+		const result = await tool.execute("call-no-history", {});
+
+		assert.deepEqual(result.content.map((c) => c.type), ["text", "image"]);
+		assert.match(result.content[0]?.text ?? "", /FRAME #003/);
+	});
+
 	it("explains a failure instead of letting the model answer blind", async () => {
 		const state = boundState();
 		const { tool, appended } = setup(state, captureFails);

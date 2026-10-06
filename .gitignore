@@ -30,3 +30,6 @@ Thumbs.db
 
 # local probe scratch
 .scratch/
+
+# Superpowers local state
+.superpowers/

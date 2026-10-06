@@ -53,8 +53,9 @@ Then, in a session:
 /gs play      # pick the game window to watch
 ```
 
-Ask a question. A frame of the bound window is captured as you submit and
-attached to that turn.
+Ask a question. By default, the model captures a frame only when it needs the
+screen to answer. You can opt into 1 fps RAM-only rolling history with
+`/gs history on`.
 
 ## How it works
 
@@ -63,11 +64,11 @@ window" approach would photograph a text editor. Sidekick therefore binds a
 specific window handle and re-validates it before every capture. If you switch
 games, run `/gs play` again.
 
-Frames are not taken on every message. The model calls `game_frame` when the
-answer depends on what is on screen — a question about lore, a build or a boss
-costs nothing at all. Whichever way a frame arrives, a separate metadata entry
-records its size, token cost and hash for `/gs frames` and `/gs status`, without
-duplicating the image.
+With rolling history off (the default), frames are not taken on every message.
+The model calls `game_frame` when the answer depends on what is on screen — a
+question about lore, a build or a boss costs nothing at all. Whichever way a
+frame arrives, a separate metadata entry records its size, token cost and hash
+for `/gs frames` and `/gs status`, without duplicating the image.
 
 ## Commands
 
@@ -77,6 +78,7 @@ duplicating the image.
 | `/gs play` | Pick and bind a window. |
 | `/gs unbind` | Stop capturing. |
 | `/gs auto [on\|off]` | `on`: it looks when the answer needs the screen (default). `off`: every message carries a frame. |
+| `/gs history on\|off` | Keep up to 60 recent frames in RAM at 1 fps for context in `game_frame` (default off). |
 | `/gs status` | What is bound, whether it is still alive, capture mode, frame counters. |
 | `/gs frames` | List frames in this conversation with ids, size and token cost. |
 | `/gs display [n]` | Override which display the window is looked for on. |
@@ -103,11 +105,14 @@ turns it off everywhere.
 
 ## Nothing is photographed until it is needed
 
-Pressing `Enter` does not capture anything. The companion sees nothing at all
-until it calls `game_frame`, and it is told to call it when the answer depends on
-the screen — what just happened, where you are, what a menu or status screen
-says, what changed since the last look — and to answer without it when the
-question is about the game rather than the screen.
+With rolling history off, pressing `Enter` does not capture anything. The
+companion sees nothing at all until it calls `game_frame`, and it is told to
+call it when the answer depends on the screen — what just happened, where you
+are, what a menu or status screen says, what changed since the last look — and
+to answer without it when the question is about the game rather than the screen.
+When enabled with `/gs history on`, the bound game window is sampled once per
+second into a RAM-only buffer; only a few selected frames are sent when
+`game_frame` is called.
 
 The reason is simple arithmetic. A frame is ~150 KB of base64 in the session
 file and ~595 image tokens of context. Three questions about lore in the same

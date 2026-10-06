@@ -22,6 +22,7 @@ import { Type } from "typebox";
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { captureFrame } from "./capture.ts";
 import { captionFor } from "./frames.ts";
+import { selectHistoryFrames } from "./history.ts";
 import { describeFailure } from "./attach.ts";
 import { FRAME_ENTRY } from "./ledger.ts";
 import { formatSize, type SidekickState } from "./state.ts";
@@ -100,6 +101,7 @@ export function registerTools(
 				};
 			}
 
+			const historical = state.historyEnabled ? selectHistoryFrames(state.historyFrames) : [];
 			const outcome = await capture(state);
 			if (!outcome.ok) {
 				const reason = describeFailure(outcome.failure);
@@ -116,12 +118,31 @@ export function registerTools(
 			// A tool result is not a conversation message, so nothing else in the
 			// transcript describes this frame. Without an entry here the ledger
 			// rebuilds from zero on the next process and `/gs frames` forgets it.
+			const content = historical.flatMap((snapshot) => [
+				{
+					type: "text" as const,
+					text: captionFor(snapshot)
+						.replace("[FRAME #", "[HISTORY #")
+						.replace("This is the current game state at the moment you asked.", "This is an earlier game state captured before you asked."),
+				},
+				{ type: "image" as const, data: snapshot.data, mimeType: snapshot.mimeType },
+			]);
+			content.push(
+				{ type: "text", text: captionFor(frame) },
+				{ type: "image", data: frame.data, mimeType: frame.mimeType },
+			);
+			for (const snapshot of historical) {
+				state.framesCaptured++;
+				state.frameLog.push(snapshot.record);
+				if (state.frameLog.length > 50) state.frameLog.shift();
+			}
+			state.framesAttached += historical.length;
 			pi.appendEntry(FRAME_ENTRY, { ...frame.record, reason: "tool" });
+			for (const snapshot of historical) {
+				pi.appendEntry(FRAME_ENTRY, { ...snapshot.record, reason: "history" });
+			}
 			return {
-				content: [
-					{ type: "text", text: captionFor(frame) },
-					{ type: "image", data: frame.data, mimeType: frame.mimeType },
-				],
+				content,
 				details: {
 					id: frame.record.id,
 					exe: frame.record.exe,

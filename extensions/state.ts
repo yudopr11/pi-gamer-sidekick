@@ -107,6 +107,12 @@ export interface SidekickState {
 
 	/** Recent frames held in this process, pruned to a short tail. See ledger.ts. */
 	frames: Frame[];
+	/** Opt-in, RAM-only rolling frame context. Sampled pixels are never persisted. */
+	historyEnabled: boolean;
+	historyFrames: Frame[];
+	historyTimer: ReturnType<typeof setInterval> | null;
+	historyCaptureInFlight: boolean;
+	historyGeneration: number;
 	nextFrameId: number;
 
 	/**
@@ -148,6 +154,11 @@ export function createState(): SidekickState {
 		binding: null,
 		bindingStale: false,
 		frames: [],
+		historyEnabled: false,
+		historyFrames: [],
+		historyTimer: null,
+		historyCaptureInFlight: false,
+		historyGeneration: 0,
 		frameLog: [],
 		nextFrameId: 1,
 		pendingFrame: null,

@@ -30,6 +30,10 @@ import { captureWindowJpeg, displayFor, grabRegion, probeOccluders, queryWindow,
 import { recordFrame } from "./ledger.ts";
 import type { CaptureFailure, Frame, FrameRecord, SidekickState } from "./state.ts";
 
+export interface CaptureDependencies {
+	queryWindow: typeof queryWindow;
+}
+
 export type CaptureOutcome = { ok: true; frame: Frame; elapsedMs: number } | { ok: false; failure: CaptureFailure; elapsedMs: number };
 
 /**
@@ -44,7 +48,10 @@ const BLACK_RED_MEAN = 2;
 /**
  * Capture the bound window's current frame.
  */
-export async function captureFrame(state: SidekickState): Promise<CaptureOutcome> {
+export async function captureFrame(
+	state: SidekickState,
+	options: { record?: boolean } & Partial<CaptureDependencies> = {},
+): Promise<CaptureOutcome> {
 	const started = Date.now();
 
 	if (!state.available) {
@@ -52,14 +59,17 @@ export async function captureFrame(state: SidekickState): Promise<CaptureOutcome
 	}
 	const binding = state.binding;
 	if (!binding) return { ok: false, failure: { kind: "no-binding" }, elapsedMs: Date.now() - started };
+	const setBindingStale = (stale: boolean) => {
+		if (state.binding === binding) state.bindingStale = stale;
+	};
 
 	// --- RESOLVE -------------------------------------------------------------
 	// The HWND is never trusted. Windows recycles handles, so a binding written
 	// last week can point at an unrelated window today. One targeted query, not
 	// a full enumeration — this runs on the capture path. (PRD §11 R-5)
-	const live = await queryWindow(binding.hwnd);
+	const live = await (options.queryWindow ?? queryWindow)(binding.hwnd);
 	if (!live) {
-		state.bindingStale = true;
+		setBindingStale(true);
 		return { ok: false, failure: { kind: "stale-binding" }, elapsedMs: Date.now() - started };
 	}
 	if (live.minimized || live.bounds.width === 0 || live.bounds.height === 0) {
@@ -132,10 +142,13 @@ export async function captureFrame(state: SidekickState): Promise<CaptureOutcome
 	};
 	const frame: Frame = { record, data: shot.jpeg.toString("base64"), mimeType: "image/jpeg" };
 
-	recordFrame(state, record);
-	state.frames.push(frame);
-	pruneFrames(state);
+	if (options.record !== false) {
+		recordFrame(state, record);
+		state.frames.push(frame);
+		pruneFrames(state);
+	}
 	state.lastError = null;
+	setBindingStale(false);
 
 	return { ok: true, frame, elapsedMs: Date.now() - started };
 }

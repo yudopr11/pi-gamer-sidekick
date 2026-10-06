@@ -12,6 +12,7 @@ import { appendBinding } from "./binding.ts";
 import { describeFailure, statusText } from "./attach.ts";
 import { gameIdentity } from "./identity.ts";
 import { rehydrateLedger } from "./ledger.ts";
+import { startHistory, stopHistory } from "./history.ts";
 import { formatSize, type Binding, type CaptureMode, type SidekickState } from "./state.ts";
 import {
 	displayFor,
@@ -33,6 +34,7 @@ const HELP = [
 	"  /gs frames          frames captured in this conversation",
 	"  /gs auto [on|off]   on: it looks when the answer needs the screen (default)",
 	"                       off: every message carries a frame",
+	"  /gs history on|off  keep up to 60 recent frames in RAM (default off)",
 	"  /gs display <n>     look for the window on display <n>",
 	"  /gs setup           check that window capture works on this machine",
 	"  /gs unbind          stop capturing",
@@ -54,7 +56,7 @@ export function registerCommands(pi: ExtensionAPI, state: SidekickState): void {
 		description: "Gamer Sidekick — brings the game you are playing into your conversation",
 		getArgumentCompletions(prefix) {
 			const subs = [
-				"play", "status", "frames", "auto", "display", "setup", "unbind", "help",
+				"play", "status", "frames", "auto", "history", "display", "setup", "unbind", "help",
 			];
 			const hits = subs.filter((s) => s.startsWith(prefix));
 			if (hits.length === 0) return null;
@@ -114,6 +116,8 @@ async function runSubcommand(
 			return cmdFrames(state, ctx);
 		case "auto":
 			return cmdMode(state, arg, ctx);
+		case "history":
+			return cmdHistory(state, arg, ctx);
 		case "display":
 			return cmdDisplay(state, arg, ctx);
 		default:
@@ -164,6 +168,25 @@ function cmdStatus(state: SidekickState, ctx: ExtensionCommandContext): void {
  * to explain it to somebody: `auto on` promising an automatic decision while
  * in fact forcing a frame onto every message.
  */
+function cmdHistory(state: SidekickState, arg: string, ctx: ExtensionCommandContext): void {
+	const want = arg.trim().toLowerCase();
+	if (want !== "on" && want !== "off") {
+		ctx.ui.notify(`Rolling history is ${state.historyEnabled ? "on" : "off"}. Usage: /gs history on|off`, "info");
+		return;
+	}
+	if (want === "off") {
+		stopHistory(state);
+		ctx.ui.notify("Rolling frame history is off; sampled frames were discarded.", "info");
+		return;
+	}
+	if (!state.binding) {
+		ctx.ui.notify("Bind a game window first with /gs play.", "warning");
+		return;
+	}
+	startHistory(state);
+	ctx.ui.notify("Rolling frame history is on: up to 60 recent frames are kept in RAM and only a few are returned by game_frame.", "info");
+}
+
 function cmdMode(state: SidekickState, arg: string, ctx: ExtensionCommandContext): void {
 	const want = arg.trim().toLowerCase();
 	if (want !== "on" && want !== "off") {
@@ -278,8 +301,11 @@ async function cmdPlay(state: SidekickState, query: string, ctx: ExtensionComman
 		displayOverride: state.binding?.displayOverride ?? null,
 	};
 
+	const resumeHistory = state.historyEnabled;
+	if (resumeHistory) stopHistory(state);
 	state.binding = binding;
 	state.bindingStale = false;
+	if (resumeHistory) startHistory(state);
 
 	const displayNote = display ? `display ${display.index}` : "display unknown";
 	const stored = {
@@ -315,6 +341,7 @@ function cmdUnbind(state: SidekickState, ctx: ExtensionCommandContext): void {
 		return;
 	}
 	const name = state.binding.identity.exe;
+	stopHistory(state);
 	state.binding = null;
 	state.bindingStale = false;
 	ctx.ui.notify(`Stopped capturing ${name}.`, "info");
